@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arinc717-reader"
+version = "0.1.0"
+description = "Configurable ARINC 717 dataframe-driven decoding, simulation, inspection, and engineering-value visualization platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["PySide6>=6.5", "pymupdf>=1.24", "numpy>=1.26"]
+
+[project.optional-dependencies]
+# OCR for scanned dataframe documents without a text layer (RapidOCR, ONNX).
+ocr = ["rapidocr-onnxruntime>=1.3"]
+dev = ["pytest>=7.4", "rapidocr-onnxruntime>=1.3"]
+# Standalone executable builds (see packaging/README.md).
+build = ["pyinstaller>=6.10"]
+
+[project.scripts]
+arinc717-reader = "arinc717_reader.app:main"
+
+[tool.setuptools.packages.find]
+include = ["arinc717_reader*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# This machine sources ROS Jazzy, whose pytest plugins leak in via PYTHONPATH
+# and crash on import; they are irrelevant to this project.
+addopts = """
+-p no:launch_testing -p no:launch_ros -p no:ament_copyright -p no:ament_flake8
+-p no:ament_mypy -p no:ament_pep257 -p no:ament_xmllint -p no:ament_lint
+"""

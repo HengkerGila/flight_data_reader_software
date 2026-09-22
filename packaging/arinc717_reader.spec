@@ -1,0 +1,94 @@
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for the ARINC 717 Reader desktop application.
+
+Build on the platform you want to ship to (PyInstaller does not
+cross-compile):
+
+    Windows:  packaging\\build_windows.bat
+    Linux:    packaging/build.sh
+
+Produces a one-folder build in dist/ARINC717Reader/ containing the
+executable plus every Qt plugin, PyMuPDF library, ONNX runtime provider and
+RapidOCR model the application can load at run time.  One-folder is used
+rather than one-file because the OCR runtime and Qt add up to ~300 MB and a
+one-file build would unpack that on every start.
+"""
+
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+
+ROOT = Path(SPECPATH).resolve().parent
+APP_NAME = "ARINC717Reader"
+
+datas = []
+binaries = []
+hiddenimports = []
+
+# RapidOCR ships its ONNX models and config.yaml as package data; nothing
+# imports them, so PyInstaller would not see them without an explicit collect.
+for package in ("rapidocr_onnxruntime", "pymupdf"):
+    d, b, h = collect_all(package)
+    datas += d
+    binaries += b
+    hiddenimports += h
+
+# The importer loads the OCR engine lazily (inside a function), which static
+# analysis can miss; name the modules explicitly.
+hiddenimports += collect_submodules("arinc717_reader")
+hiddenimports += ["rapidocr_onnxruntime", "onnxruntime", "cv2", "shapely", "pyclipper", "yaml"]
+
+# Bundled example dataframe and document so the .exe can be tried immediately.
+for example in ("demo_256wps.adb", "demo_256wps.pdf"):
+    source = ROOT / "examples" / example
+    if source.exists():
+        datas.append((str(source), "examples"))
+
+# Qt modules the application never uses; leaving them out shrinks the build.
+excludes = [
+    "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
+    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.QtQuickWidgets",
+    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "PySide6.Qt3DCore",
+    "PySide6.Qt3DRender", "PySide6.QtCharts", "PySide6.QtDataVisualization",
+    "PySide6.QtPdf", "PySide6.QtPdfWidgets", "PySide6.QtBluetooth", "PySide6.QtNfc",
+    "PySide6.QtPositioning", "PySide6.QtLocation", "PySide6.QtSensors", "PySide6.QtSerialPort",
+    "PySide6.QtRemoteObjects", "PySide6.QtScxml", "PySide6.QtStateMachine", "PySide6.QtTest",
+    "PySide6.QtDesigner", "PySide6.QtHelp", "PySide6.QtUiTools", "PySide6.QtSql",
+    "PySide6.QtNetworkAuth", "PySide6.QtWebSockets", "PySide6.QtWebChannel", "PySide6.QtHttpServer",
+    "PySide6.QtGraphs", "PySide6.QtSpatialAudio", "PySide6.QtTextToSpeech",
+    "tkinter", "matplotlib", "IPython", "pytest",
+]
+
+a = Analysis(
+    [str(ROOT / "packaging" / "launcher.py")],
+    pathex=[str(ROOT)],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name=APP_NAME,
+    debug=False,
+    strip=False,
+    upx=False,
+    console=False,  # GUI application: no console window; logs go to a file (see app.log_file_path)
+    icon=None,      # add packaging/icon.ico and set icon=str(ROOT / "packaging" / "icon.ico") when one exists
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name=APP_NAME,
+)

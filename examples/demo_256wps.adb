@@ -1,0 +1,13 @@
+Setting,1,57,9,12,256,0,583,1464,2631,3512
+PITCH ATT #1,"Pitch attitude, captain side",Signed Analog,deg,0.176,0,-90,90,,,,2,1,1234,4,3,12,,1,1234,132,3,12,
+ROLL ATT,Roll attitude,Signed Analog,deg,0.176,0,-180,180,,,,1,1,1234,5,3,12,
+HDG MAG,Magnetic heading,Unsigned Analog,deg,0.0879,0,0,360,,,,1,1,13,6,1,12,
+IAS,Indicated airspeed,Unsigned Analog,kt,0.25,0,0,450,,,,1,1,1234,7,1,12,
+PRESS ALT,"Pressure altitude, coarse+fine multi-segment",Signed Analog,ft,0.25,0,-2000,60000,,,,1,2,1234,154,1,9,,1234,153,1,12,
+FLAP POS,Flap surface position,Unsigned Analog,deg,0.0062,-1.6,-2,45,,,,1,1,24,10,1,12,
+AOA,Angle of attack,Unsigned Analog,deg,0.0187,-10.8,-11,41,,,,1,1,13,11,1,12,
+AILERON POS,Aileron position (negative resolution),Unsigned Analog,deg,-0.0153,31.2,-31.5,31.5,,,,1,1,1234,12,1,12,
+LDG GEAR DOWN,Landing gear lever position,Discrete,,1,0,,,DOWN,UP,,1,1,1234,13,1,1,
+GPWS WARN,Ground proximity warning (active low),Discrete,,1,0,,,NORMAL,WARNING,Active low: raw 0 means warning active,1,1,1234,13,2,2,
+SEL CRS,"Selected course (BCD, 3 digits)",BCD,deg,1,0,0,359,,,,1,1,2,14,1,12,
+SPARE 15,Unassigned source type (decodes as UNSUPPORTED TYPE),Special,,1,0,,,,,,1,1,1,15,1,12,

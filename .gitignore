@@ -7,3 +7,4 @@ build/
 dist/
 .venv-win/
 ARINC717_READER_SYSTEM_DESIGN.md
+examples/FDS81.pdf

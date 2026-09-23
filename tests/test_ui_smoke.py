@@ -179,6 +179,50 @@ if importlib.util.find_spec("pymupdf") is not None:
     assert window.dataframe_page._tree.topLevelItemCount() == 12
     print("PDF_REVIEW_OK")
 
+# Settings → Theme switches the whole application palette (spec: user request);
+# persist=False keeps the test from writing the user's settings store.
+from PySide6.QtGui import QPalette
+menus = [a.text() for a in window.menuBar().actions()]
+assert menus == ["&File", "&Stream", "&Settings", "&Help"], menus
+startup_window = app.palette().color(QPalette.ColorRole.Window)
+window.set_theme("dark", persist=False)
+app.processEvents()
+assert app.palette().color(QPalette.ColorRole.Window).lightness() < 90
+assert app.palette().color(QPalette.ColorRole.Text).lightness() > 180
+assert window.theme == "dark" and window._theme_actions["dark"].isChecked()
+assert not window._theme_actions["light"].isChecked()
+window.set_theme("light", persist=False)
+app.processEvents()
+assert app.palette().color(QPalette.ColorRole.Window).lightness() > 200
+from arinc717_reader.ui.theme import THEMES, theme_palette
+assert set(window._theme_actions) == set(THEMES) and len(THEMES) >= 10
+window.set_theme("nord", persist=False)
+app.processEvents()
+assert app.palette().color(QPalette.ColorRole.Window) == theme_palette("nord").color(QPalette.ColorRole.Window)
+assert window._theme_actions["nord"].isChecked() and not window._theme_actions["dark"].isChecked()
+# The Help guide re-renders its links in the new palette's link colour.
+nord_link = theme_palette("nord").color(QPalette.ColorRole.Link).name()
+assert nord_link in window.help_page._browser.document().defaultStyleSheet(), nord_link
+window.set_theme("system", persist=False)
+app.processEvents()
+assert app.palette().color(QPalette.ColorRole.Window) == startup_window
+assert window._theme_actions["system"].isChecked()
+
+# Help tab screenshots: listed in the guide and loadable through the browser's search paths.
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QTextDocument
+from arinc717_reader.ui.help.help_content import FIGURES, available_figures
+help_page = window.help_page
+if help_page.images_dir.is_dir():
+    html = help_page._browser.document().toHtml()
+    shown = [f for anchor in FIGURES for f in available_figures(anchor)]
+    assert len(shown) >= 8, shown
+    for figure in shown:
+        assert figure.file in html, figure.file
+        resource = help_page._browser.loadResource(QTextDocument.ResourceType.ImageResource, QUrl(figure.file))
+        assert resource is not None and not (hasattr(resource, "isNull") and resource.isNull()), figure.file
+    print("HELP_FIGURES_OK")
+
 window.close()
 print("UI_SMOKE_OK")
 """
@@ -202,3 +246,5 @@ def test_ui_smoke():
     assert "UI_SMOKE_OK" in result.stdout
     if importlib.util.find_spec("pymupdf") is not None:
         assert "PDF_REVIEW_OK" in result.stdout
+    if (Path(__file__).resolve().parents[1] / "img").is_dir():
+        assert "HELP_FIGURES_OK" in result.stdout

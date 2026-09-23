@@ -54,6 +54,35 @@ class ParameterDecoder:
             values.extend(self.decode_parameter(frame, parameter))
         return values
 
+    def decode_subframe(
+        self, frame: Arinc717Frame, dataframe: DataframeDefinition, subframe: int
+    ) -> list[EngineeringValue]:
+        """Decode only the occurrences recorded in ``subframe`` (spec v2 §26G).
+
+        Used by live streaming so values are published as soon as their
+        subframe arrives.  Segments of one occurrence always share a subframe
+        set, so a subframe is self-contained.  Mapping errors are reported
+        once, with SF1, so a bad parameter still shows up in the live view.
+        """
+        values: list[EngineeringValue] = []
+        for parameter in dataframe.parameters:
+            if not parameter.occurrences:
+                if subframe == 1:
+                    values.extend(self.decode_parameter(frame, parameter))
+                continue
+            for occurrence in parameter.occurrences:
+                segments = sorted(occurrence.segments, key=lambda s: s.sequence)
+                subframe_sets = {tuple(sorted(set(s.subframes))) for s in segments}
+                if not segments or len(subframe_sets) != 1 or not subframe_sets.copy().pop():
+                    if subframe == 1:
+                        values.extend(self.decode_occurrence(frame, parameter, occurrence))
+                    continue
+                if subframe in subframe_sets.pop():
+                    values.append(
+                        self._decode_sample(frame, parameter, occurrence, segments, subframe)
+                    )
+        return values
+
     def decode_parameter(
         self, frame: Arinc717Frame, parameter: ParameterDefinition
     ) -> list[EngineeringValue]:

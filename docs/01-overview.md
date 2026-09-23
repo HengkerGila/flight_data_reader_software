@@ -19,14 +19,26 @@ The ARINC 717 Reader is a desktop application that:
    hexadecimal representations and lets the user edit individual words;
 4. decodes every mapped parameter into raw bits, decoded decimal and
    engineering value, with a complete trace of how each value was derived;
-5. simulates frames without aircraft hardware: random words, hand-edited
-   words, or a **scenario** in which requested engineering values are encoded
-   into the frame and decoded back for closed-loop verification;
-6. exports dataframes back to `.adb`.
+5. produces frames without aircraft hardware: random words or hand-edited
+   words in the Frame View, and, for the live stream, engineering values
+   encoded into frames by the **parameter encoder** (the same encoder is the
+   closed-loop check of the test suite and the selftest);
+6. receives a **continuous word stream** over a serial port from an STM32
+   hardware-in-the-loop simulator (or from an in-process virtual device),
+   synchronises it into subframes, fills the Frame View progressively and
+   decodes each subframe as it arrives into timestamped parameter samples;
+7. **graphs** those samples live, with time windows, statistics and
+   same-unit overlays, and **records** sessions that can be replayed through
+   the same pipeline;
+8. exports dataframes back to `.adb`.
 
-Real hardware acquisition (ABUS 717 / FTDI) is deliberately deferred; the
-application is designed so a hardware source can be added later behind the
-same frame-source interface without touching the rest.
+Real ARINC 717 acquisition (ABUS 717) remains deferred until its transport
+protocol or SDK is available (spec v2 Phase 14). Until then an STM32F103 +
+FTDI board running the project's own `SIM-A717 v1` protocol stands in as a
+**stream emulator**: it exercises serial acquisition, timing, synchronisation,
+live decoding, graphing, recording and fault handling end to end, but it is
+not an ARINC 717 electrical interface (spec v2 §3A). The real hardware will
+plug in behind the same subframe boundary.
 
 ## ARINC 717 in five minutes
 
@@ -64,21 +76,43 @@ They meet in the **parameter decoder**, which reads a frame and a dataframe
 and produces engineering values. The GUI observes these three kinds of data
 through stores and never becomes a source of truth itself.
 
+The live path adds two derived levels on top (spec v2 §3A): timestamped
+**parameter samples** (`arinc717_reader/streaming/parameter_sample.py`), which
+per-subframe decoding publishes on a bus, and the bounded **time series**
+(`streaming/timeseries_store.py`) the Graphs page reads. Like engineering
+values they are computed, never edited, and they never feed back into the
+frame or the dataframe. See [13 — Live streaming, graphs and recording](13-live-streaming-graphs-recording.md).
+
 ## The workflow at a glance
+
+![Parameters page](../img/mockups_with_data/parameters_data.png)
+
+*Frame words on the left of the pipeline become decoded samples like these: the Parameters page with the decode trace of the selected row.*
+
 
 ```
  .adb file ──► ADB parser ─────┐
  PDF document ─► PDF importer ─┤──► Canonical dataframe ──► Validator
  manual entry ─► Editor ───────┘            │
                                             ▼
- Random / Manual / Scenario ──► Canonical frame ──► Parameter decoder ──► Engineering values
+ Random / Manual / frame file ─► Canonical frame ──► Parameter decoder ──► Engineering values
                                      ▲                                          │
-                                     └──────── Parameter encoder (scenario) ◄───┘  (closed loop)
+                                     └──── Parameter encoder (signals, tests) ◄──┘  (closed loop)
+
+ STM32 + FTDI / VIRTUAL ──► SIM-A717 parser ──► synchronizer ──► subframe assembler ──► progressive frame
+ session file (replay) ─────────────────────────────────────────────┘        │
+                                                                             ▼ per subframe
+                                              Parameter samples ──► Time series ──► Graphs
+                                                      └──► Session recorder ──► session file
 ```
 
 A typical session: load a dataframe, generate or load a frame, inspect words
-and decoded parameters, edit words or apply a scenario, save the frame, and
-export the dataframe if it was edited or imported.
+and decoded parameters, edit words, save the frame, and export the dataframe
+if it was edited or imported. A live session: load a dataframe, press
+▶ Start stream (the virtual device by default, or the board chosen on the
+Hardware page), watch the Frame View, Parameters and Graphs pages, ❚❚ Pause
+stream to hold a frame, record from the File menu, and replay the recording
+later. The Help tab (F1) is the in-application user guide.
 
 ## Package map
 
@@ -96,10 +130,24 @@ arinc717_reader/
 │   ├── pdf_importer/      PDF pipeline: ingest, scan, extract, normalize, review, pipeline, synth
 │   ├── editor.py          Qt-free helpers for the dataframe editor
 │   └── compare.py         semantic dataframe comparison (round-trip acceptance)
-├── sources/               frame sources: random, manual, scenario, frame JSON I/O, hardware stub
-├── state/                 observable stores: dataframe, frame, engineering
-├── services/              dataframe, frame, decoding and simulation services
-└── ui/                    PySide6 GUI: main window and the five pages with their dialogs
+├── sources/               frame sources: random, manual, scenario, frame JSON I/O, ABUS stub
+│   ├── stream_base.py     streaming sources: thread, event queue, shared subframe assembler
+│   ├── stream_events.py   stream event kinds (the explicit stream states)
+│   ├── serial/            SIM-A717 v1 protocol, byte transports (pyserial, in-memory pipe),
+│   │                      stream parser, synchronizer, subframe assembler, diagnostics,
+│   │                      the serial source and the virtual STM32 device
+│   └── replay_source.py   session replay as a streaming source
+├── streaming/             parameter samples, the sample bus, the bounded time-series store,
+│                          engineering signal generators
+├── recording/             session file format (JSON Lines) and the session recorder
+├── state/                 observable stores: dataframe, frame, engineering, stream
+├── services/              dataframe, frame, decoding, simulation, serial, streaming, recording
+└── ui/                    PySide6 GUI: main window, the seven pages (Frame View, Parameters,
+                           Graphs, Dataframe, Hardware, Import, Help), the stream toolbar
+                           (stream_controls.py) and the in-app guide (help/)
+
+firmware/stm32f103_sim_a717/   the STM32F103 stream emulator (C, freestanding, Makefile)
 ```
 
-Everything below `ui/` is importable and testable without a Qt application.
+Everything below `ui/` is importable and testable without a Qt application,
+and the whole live path runs without hardware through the virtual device.

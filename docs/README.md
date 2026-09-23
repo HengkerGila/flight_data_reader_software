@@ -2,13 +2,24 @@
 
 This folder documents the ARINC 717 Reader: a simulation-first desktop
 application that loads a flight-data-recorder dataframe, shows raw ARINC 717
-frames, decodes them into engineering values, simulates frames, and imports
+frames, decodes them into engineering values, simulates frames, imports
 dataframe definitions from `.adb` files or from dataframe layout documents
-in PDF form (born-digital or scanned).
+in PDF form (born-digital or scanned), receives a live word stream from an
+STM32 hardware-in-the-loop simulator (or an in-process virtual device),
+decodes it subframe by subframe, graphs parameters, and records and replays
+sessions.
+
+![Main window](../img/mockups_with_data/frame_view_data.png)
+
+*The application with the FDS81 dataframe (imported from a PDF) and a paused virtual stream.*
+
 
 The implementation specification the software follows is
-`../ARINC717_READER_SYSTEM_DESIGN.md`. Section numbers quoted in these pages
-(for example "spec §14") refer to that document.
+`../ARINC717_READER_SYSTEM_DESIGN_v2.md`, revision 2 of the design: it keeps
+the v1 sections unchanged and adds the live streaming, graphing and recording
+sections (§3A, §26A–§26T, §46A–§46C, Phases 9–14). Section numbers quoted as
+"spec §14" refer to sections common to both revisions; "spec v2 §26G" marks
+a revision 2 addition.
 
 ## Contents
 
@@ -25,6 +36,12 @@ The implementation specification the software follows is
 | [09 — Architecture and development](09-architecture-and-development.md) | Layering rules, stores and services, event flow, spec traceability, testing strategy, extension points, roadmap |
 | [10 — Troubleshooting](10-troubleshooting.md) | Error states, decode statuses, OCR and PDF problems, environment quirks |
 | [11 — Scanned page processing](11-scanned-page-processing.md) | The image pipeline for scanned documents: scan detection, deskew, ruling-line grid detection, text layer vs OCR, cell assignment, second-pass recognition, tuning, limitations |
+| [12 — The SIM-A717 v1 protocol](12-sim-a717-protocol.md) | The project-owned serial protocol of the hardware-in-the-loop simulator: word container, framed packets, commands and replies, device modes, fault injection, what the PC sends, the virtual device |
+| [13 — Live streaming, graphs and recording](13-live-streaming-graphs-recording.md) | The live path: threads and the pump, parser, synchronizer and assembler, progressive frames, per-subframe decoding into timestamped samples, the bounded time-series store, the Graphs page, engineering-signal upload, session files, replay, acceptance and constraints |
+
+The firmware for the STM32F103 stream emulator has its own
+[README](../firmware/stm32f103_sim_a717/README.md) (wiring, build, flash,
+limits).
 
 ## Quick start
 
@@ -33,11 +50,14 @@ cd ~/projects/flight_data_reader_software
 .venv/bin/arinc717-reader examples/demo_256wps.adb
 ```
 
-Then open the **Simulator** tab, choose **Scenario**, type `-20` for
-`PITCH ATT #1`, press **Apply Scenario**, and look at the **Frame View** and
-**Parameters** tabs. The frame now contains the encoded word pattern, and the
-decoder reads it back as −20.064 degrees: the closed loop that the whole
-design is built around.
+Then press **▶ Start stream** in the toolbar. With nothing connected yet this
+connects to the in-process virtual STM32 device (the port selected on the
+**Hardware** tab by default) and starts a 256 WPS stream whose values are
+encoded through the dataframe on the PC and decoded back on arrival. Watch
+the **Frame View** update one subframe column per second, the **Parameters**
+tab follow, and pick a parameter on the **Graphs** tab. **❚❚ Pause stream**
+holds the frame so it can be inspected and edited; the **Help** tab (F1) is
+the in-application user guide.
 
 ## Conventions used in these pages
 
@@ -45,5 +65,7 @@ design is built around.
   which is also the number of words in each subframe.
 - Bit numbers run **12 (most significant) down to 1 (least significant)**.
 - Subframes are numbered **1 to 4**; word addresses are **1-based**.
+- Stream, connection and slot states are written in capitals as the
+  application shows them (`STREAM_SYNC_LOST`, `RECONNECTING`, `MISSING`).
 - Code paths are given relative to the package, for example
   `arinc717_reader/decoder/parameter_decoder.py`.

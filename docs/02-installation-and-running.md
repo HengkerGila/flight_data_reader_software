@@ -8,13 +8,17 @@
 | PySide6 | 6.5 or newer | desktop GUI |
 | PyMuPDF (`pymupdf`) | 1.24 or newer | PDF reading, rendering and native table detection |
 | numpy | 1.26 or newer | grid detection on scanned pages |
+| pyserial | 3.5 or newer | COM port access for the hardware-in-the-loop stream (port listing, 8N1 transport) |
 | rapidocr-onnxruntime | 1.3 or newer, optional | OCR for scanned pages without a text layer |
 | pytest | 7.4 or newer, development only | test suite |
+| arm-none-eabi-gcc, openocd or stm32flash | optional | Building and flashing the STM32 stream emulator firmware; not needed to run the application |
 
 The application runs on Linux, and the GUI works both on a normal display and
 headless with `QT_QPA_PLATFORM=offscreen` (used by the tests). No system
 packages beyond Python are required; the OCR engine ships its models inside
-the Python package, so no Tesseract installation is needed.
+the Python package, so no Tesseract installation is needed. No hardware is
+required either: the Hardware page offers a `VIRTUAL` port that runs the
+STM32 emulation in-process.
 
 ## Setting up
 
@@ -47,8 +51,31 @@ application still opens.
 
 Logging goes to standard error in the form
 `timestamp module level message`, with structured `event=... key=value` text
-for the important operations (dataframe loaded, frame saved, scenario
-applied, PDF imported, PDF published).
+for the important operations (dataframe loaded, frame saved, PDF imported,
+PDF published, serial connected, stream started, fault injected, recording
+started, replay started). Per-word and per-sample
+activity is never logged at INFO (spec v2 §48); sync losses and rate
+mismatches are warnings.
+
+### Trying the live stream without hardware
+
+![Hardware page connected to the virtual device](../img/mockups_with_data/hardware_data.png)
+
+*The Hardware page connected to the in-process virtual device: the event log shows the handshake replies, the table lists the simulated signals.*
+
+
+1. Load a dataframe (the demo is fine).
+2. Press **▶ Start stream** in the toolbar: it connects to the port selected
+   on the **Hardware** tab (`VIRTUAL` by default) and starts the stream.
+3. Watch the **Frame View** update one subframe column per second, then open
+   the **Graphs** tab and choose a parameter. **❚❚ Pause stream** holds the
+   frame; the **Help** tab (F1) explains every page.
+
+The *Virtual speed* factor on the Hardware page runs the virtual device
+faster than real time; it does nothing for a real port. With a real STM32
+board, pick its FTDI port instead of `VIRTUAL`; building and wiring the board
+is described in the [firmware README](../firmware/stm32f103_sim_a717/README.md)
+and the protocol in [12 — The SIM-A717 v1 protocol](12-sim-a717-protocol.md).
 
 ## Bundled examples
 
@@ -67,12 +94,14 @@ dataframe directly from code, without any file.
 .venv/bin/python -m pytest
 ```
 
-The suite takes about half a minute. It includes an offscreen GUI smoke test
-that runs in a subprocess, synthetic PDF documents generated on the fly
-(born-digital, scanned with a text layer, scanned image-only with OCR), and a
-fast test against the text-layer pages of the real CN235 document. The full
-OCR run over that document takes a few minutes and is skipped unless you ask
-for it:
+The suite takes about half a minute. It includes offscreen GUI smoke tests
+that run in a subprocess, synthetic PDF documents generated on the fly
+(born-digital, scanned with a text layer, scanned image-only with OCR), a
+fast test against the text-layer pages of the real CN235 document, and the
+live-stream tests, which drive the virtual STM32 device at 200× speed through
+the real acquisition, decoding, graphing and recording path. The full OCR run
+over the CN235 document takes a few minutes and is skipped unless you ask for
+it:
 
 ```bash
 ARINC717_OCR_TESTS=1 .venv/bin/python -m pytest tests/test_real_document.py
@@ -104,11 +133,36 @@ for value in ctx.engineering_store.values:
 decoding service re-decodes automatically whenever the frame or the dataframe
 changes.
 
+The live path works headless too; without the GUI's 50 ms timer, call
+`ctx.pump()` yourself to move stream events onto the stores:
+
+```python
+import time
+from arinc717_reader.app import build_context
+
+ctx = build_context()
+ctx.dataframe_service.load_adb("examples/demo_256wps.adb")
+ctx.serial_service.connect("VIRTUAL", virtual_speed=50.0)   # or "/dev/ttyUSB0"
+ctx.serial_service.start_stream()
+while ctx.stream_store.diagnostics.frames_received < 3:
+    ctx.pump()
+    time.sleep(0.01)
+print(ctx.timeseries_store.stats("demo-ias"))               # count, current, min, max, average
+ctx.shutdown()
+```
+
 ## Standalone executable
+
+On Windows the folder build can also be wrapped into a single `.msi`
+installer (`packaging\build_msi.bat`, WiX Toolset): Start Menu and desktop
+shortcuts, an entry in Settings > Apps, in-place upgrades. See
+[packaging/README.md](../packaging/README.md#msi-installer-one-file-click-to-install).
 
 A one-folder build with an `.exe` for Windows (or a binary for Linux) can be
 made with PyInstaller; the spec, the build scripts and the troubleshooting
 notes are in [`packaging/README.md`](../packaging/README.md). The build must
 be made on the target operating system. `ARINC717Reader --selftest` checks a
-finished build without opening a window.
+finished build without opening a window: decoder loop, ADB round trip, a
+virtual HIL stream (connect, two frames, sync locked, samples decoded), GUI
+construction, PDF import and, optionally, the OCR engine.
 

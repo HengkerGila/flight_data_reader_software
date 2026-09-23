@@ -25,6 +25,16 @@ echo Build finished: dist\ARINC717Reader\ARINC717Reader.exe
 echo Checking the build ...
 dist\ARINC717Reader\ARINC717Reader.exe --selftest
 echo Copy the whole dist\ARINC717Reader folder to another PC; the .exe needs the files beside it.
+
+where wix >nul 2>nul
+if not errorlevel 1 (
+    echo.
+    echo WiX found - building the MSI installer ...
+    call packaging\build_msi.bat
+) else (
+    echo.
+    echo To produce a one-file MSI installer, install WiX ^(see packaging\README.md^) and run packaging\build_msi.bat
+)
 exit /b 0
 
 :fail

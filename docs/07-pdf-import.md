@@ -303,6 +303,11 @@ changes underneath it (for example after the WPS is corrected).
 
 ## The review dialog
 
+![PDF review dialog on the CN235-220 document](../img/mockups_no_data/pdf_import_review.png)
+
+*The review dialog on the 21-page scanned document: 185 rows approved automatically, 123 flagged for review, the first row selected with its verbatim cells.*
+
+
 Opened automatically after an import, or from the Import page's review
 queue.
 
@@ -353,6 +358,11 @@ selection, and repeat per reason. Rows with errors get Edit; rows that are
 not parameters at all (a sync word, a stamp-garbled line) get Exclude.
 
 ## The CN235-220 document
+
+![Dataframe page after publishing the CN235-220 import](../img/mockups_with_data/dataframe_data.png)
+
+*The published document on the Dataframe page: 122 parameters, 0 errors, 14 warnings (discretes without state labels and overlapping fields in word 212).*
+
 
 `examples/Scanned_from_UK_Lexmark03-12-2025-123425 (1) data frame.pdf` is a
 real ARINC 717 dataframe layout document for the CN235-220 by Flight Data

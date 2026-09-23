@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ARINC 717 Data Reader - Windows Installer package (WiX Toolset v5 or newer).
+
+  Wraps the PyInstaller one-folder build (dist\ARINC717Reader) into a single
+  .msi: files under Program Files, Start Menu and desktop shortcuts, an entry
+  in Apps & Features, in-place upgrades when a newer version is installed.
+
+  Build it with packaging\build_msi.bat, which passes Version (from
+  pyproject.toml), SourceDir and IconFile.  The defaults below only make the
+  file compile on its own from the packaging\windows folder.
+
+  The UpgradeCode must never change: it is how Windows recognises later
+  versions of this product.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <?ifndef Version ?>
+    <?define Version = "0.1.0" ?>
+  <?endif?>
+  <?ifndef SourceDir ?>
+    <?define SourceDir = "..\..\dist\ARINC717Reader" ?>
+  <?endif?>
+  <?ifndef IconFile ?>
+    <?define IconFile = "..\icon.ico" ?>
+  <?endif?>
+
+  <Package Name="ARINC 717 Data Reader"
+           Manufacturer="ARINC 717 Reader project"
+           Version="$(var.Version)"
+           UpgradeCode="27589e78-6f5c-47b8-9a80-facb98fb5d23"
+           Language="1033"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <!-- A newer version replaces the installed one; the same version may be
+         reinstalled (repair); an older one is refused. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first." />
+
+    <!-- One file: the compressed cabinet is embedded in the .msi. -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPCOMMENTS"
+              Value="Dataframe-driven ARINC 717 decoding, STM32 hardware-in-the-loop streaming, live graphs, session recording and PDF dataframe import." />
+
+    <!-- Install location; the wizard lets the user change it. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ARINC 717 Data Reader" />
+    </StandardDirectory>
+
+    <!-- Every file of the PyInstaller folder, sub-folders included (Qt,
+         PyMuPDF, the OCR models, examples, the Help screenshots). -->
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.SourceDir)\**" />
+    </ComponentGroup>
+
+    <!-- Shortcuts.  They point at the exe by path, so each component carries
+         a registry value as its key path (per machine or per user via HKMU). -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="ARINC 717 Data Reader"
+                  Description="ARINC 717 frame inspection, live streaming, graphs and dataframe import"
+                  Target="[INSTALLFOLDER]ARINC717Reader.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKMU"
+                       Key="Software\arinc717_reader\ARINC717Reader\Installer"
+                       Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut">
+        <Shortcut Id="DesktopShortcut"
+                  Name="ARINC 717 Data Reader"
+                  Target="[INSTALLFOLDER]ARINC717Reader.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKMU"
+                       Key="Software\arinc717_reader\ARINC717Reader\Installer"
+                       Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="ARINC 717 Data Reader" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+    <!-- Installed by default; leave out with  msiexec /i ... ADDLOCAL=Main  -->
+    <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Level="1">
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Wizard: Welcome, destination folder, Install, Finish.  The licence
+         page of the stock dialog set is skipped (no licence text is shipped);
+         the two Publish rows override the stock Welcome/InstallDir transitions. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="99" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="99" />
+    </UI>
+  </Package>
+</Wix>

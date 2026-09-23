@@ -2,37 +2,84 @@
 
 ## The main window
 
+![Main window before anything is loaded](../img/mockups_no_data/frame_view.png)
+
+*The main window at start-up: menu bar, the stream toolbar, the header line, the tabs, an empty Frame View and the status bar.*
+
+
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│ File                                                                   │
-│ Dataframe: demo_256wps.adb*   WPS: 256   Source: SCENARIO   Frame: 000003 │
-├────────────────────────────────────────────────────────────────────────┤
-│ [Frame View] [Parameters] [Dataframe] [Simulator] [Import]             │
-│                                                                        │
-│                          current page                                  │
-│                                                                        │
-├────────────────────────────────────────────────────────────────────────┤
-│ Source: SCENARIO  DF: VALID, 1 warn  WPS: 256  Parameters: 12  Decode OK: 33  FAIL: 1 │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ File   Stream   Help                                                             │
+│ ▶ Start stream  ❚❚ Pause stream   LIVE VIRTUAL · frame 000031 SF3                  │
+│ Dataframe: demo_256wps.adb*   WPS: 256   Source: SERIAL (live)   Frame: 000031    │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ [Frame View] [Parameters] [Graphs] [Dataframe] [Hardware] [Import] [Help]         │
+│                                                                                  │
+│                                current page                                      │
+│                                                                                  │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ Source: SERIAL  DF: VALID, 1 warn  WPS: 256  Parameters: 12  Decode OK: 39  FAIL: 1  Stream: STREAMING VIRTUAL  ● REC │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Header line.** The loaded dataframe (its file name, or its name when it was
 not loaded from a file), its WPS, the name of the source that produced the
-current frame (`RAW RANDOM`, `MANUAL`, `SCENARIO`, `FILE name.json`), and the
-frame index. A `*` after the dataframe name means it has edits or imported
-content that has not been exported yet; the window title shows the same
-marker.
+current frame (`RAW RANDOM`, `MANUAL`, `FILE name.json`, and `SERIAL` or
+`REPLAY` with the suffix `(live)` while a frame is still being received), and
+the frame index. A `*` after the dataframe name means it has
+edits or imported content that has not been exported yet; the window title
+shows the same marker.
+
+**Stream toolbar.** Two buttons that control the incoming stream from any
+page, and a state text.
+
+| Button | Effect |
+| --- | --- |
+| ▶ Start stream | Starts the live stream. When nothing is connected it first connects with the port, baud and protocol chosen on the Hardware page (the virtual device by default), then starts. During a paused replay it resumes the replay. Starting after a pause restarts the frame counter at 0. |
+| ❚❚ Pause stream | Sends `STOP` to the device: the incoming stream stops and the last frame stays in the Frame View as a static frame that can be inspected, edited and saved; ▶ Start stream resumes. During a replay it pauses the replay. Recording is not affected (it simply records nothing while the stream is paused). |
+
+The state text reads `LIVE VIRTUAL · frame 000031 SF3` while streaming,
+`PAUSED · connected to VIRTUAL` while connected but stopped, `REPLAY 3.2 /
+12.0 s` (or `REPLAY paused …`) during a replay, `RECONNECTING` while the
+link is being recovered, and a hint when nothing is connected. Recording and
+replay are started from the File menu, see
+[Recording and replay](#recording-and-replay).
 
 **Status bar.** The frame source, the dataframe validity (`VALID`, or the
 number of validation errors, plus the number of warnings), the WPS of the
 *frame* (which can differ from the dataframe's WPS until a new frame is
-generated), the parameter count, and how many decoded samples are `VALID`
-versus any other status.
+generated), the parameter count, how many decoded samples are `VALID` versus
+any other status, the stream state with its port (`Stream: STREAMING
+/dev/ttyUSB0`, `Stream: RECONNECTING VIRTUAL`, `Stream: —` when nothing is
+connected), and `● REC` or `▶ REPLAY` while a recording or a replay runs.
 
 **File menu.** New Dataframe…, Open ADB…, Import PDF…, Export ADB…, Load
-Frame…, Save Frame…, Quit.
+Frame…, Save Frame…, then the session entries Record Session…, Stop
+Recording, Replay Session…, Pause Replay (checkable), Stop Replay and the
+Replay Speed submenu (0.25×, 0.5×, 1×, 2×, 5×, 10×), and Quit.
+
+**Stream menu.** Connect and Disconnect (the Hardware page buttons, using
+its current port and settings), Start Stream and Pause Stream (the toolbar
+buttons).
+
+**Settings menu.** Theme → System default, the light themes (Light, Solarized
+Light, Sepia) and the dark themes (Dark, Solarized Dark, Nord, Midnight Blue,
+Cockpit, High Contrast). Named themes use the Fusion style with their own
+palette on every platform; System default keeps the colours the operating
+system gave the application. The
+choice applies immediately to every page and is remembered for the next
+start (QSettings: the registry on Windows, `~/.config/arinc717_reader/` on
+Linux).
+
+**Help menu.** User Guide (F1) opens the [Help](#help) tab; About shows the
+version.
 
 ## Frame View
+
+![Frame View with a paused live frame](../img/mockups_with_data/frame_view_data.png)
+
+*A paused live frame: word addresses down the side, SF1–SF4 across, HEX representation, the Word Inspector on the right.*
+
 
 The Frame View shows the canonical frame as a table with one row per word
 address (001 to WPS) and one column per subframe (SF1 to SF4). Cells are
@@ -89,7 +136,41 @@ valid number in that base, or that exceeds 12 bits (4095), is rejected with a
 message and the dialog stays open. A successful edit changes exactly that
 canonical cell and immediately re-decodes every parameter that uses it.
 
+### Live streaming
+
+While a stream is being received, or a session is being replayed, the
+Frame View updates one subframe column per second (spec v2 §26T). The
+column of the subframe that just arrived is refreshed; the other columns
+keep showing the **value each word had before**, so every cell always shows
+its last known value and the table never blanks out between frames. The
+header reads `Source: SERIAL (live)`, and each column header carries the
+state of its subframe slot in the current frame, `SF1 · received`,
+`SF3 · pending`:
+
+| Slot state | Shown as | Meaning |
+| --- | --- | --- |
+| `RECEIVED` | current values, normal cells | The subframe arrived in order with a valid sync word. |
+| `PENDING` | previous frame's values, normal cells | Not received yet in this frame. `----` appears only for a subframe that has never held any data (the first frame after connecting). |
+| `MISSING` | previous frame's values on orange | A later subframe arrived without it, or the next frame began. |
+| `INVALID` | received words on red | The sync word, the length or a word value was wrong; a single out-of-range word is tinted a stronger red. |
+| `LATE` | current values on blue | Arrived out of order after having been marked missing. |
+
+Hovering a cell names its slot state (and says when it shows the previous
+frame's words). The frame index advances every four subframes. Editing a
+word is refused while the frame is live (`INVALID_WORD: the frame is being
+received live; stop the stream to edit`): press ❚❚ Pause stream first. The
+Parameters page shows the value decoded from each subframe as it arrives
+rather than a whole-frame decode. Pausing the stream, or losing the
+connection, leaves the last frame in place as an ordinary static frame, every
+subframe holding its last known words, that can be inspected, edited and
+saved.
+
 ## Parameters
+
+![Parameters page](../img/mockups_with_data/parameters_data.png)
+
+*One row per decoded sample of the current frame; selecting a row shows its full decode trace underneath.*
+
 
 The Parameters page lists every decoded **sample**: one row per parameter,
 occurrence and subframe. A parameter recorded in all four subframes with two
@@ -114,7 +195,66 @@ the word value and the extracted bits, then the assembled bits, decoded
 decimal, resolution, offset and engineering value. See
 [05 — Decoding](05-decoding-and-encoding.md) for the meaning of each status.
 
+During a live stream or a replay the table holds the latest value of every
+(parameter, occurrence, subframe) sample and changes subframe by subframe.
+
+## Graphs
+
+![Graphs page](../img/mockups_with_data/graphs_data.png)
+
+*A 30-second window of one parameter with the statistics box and the overlay list of parameters that share its unit.*
+
+
+The Graphs page plots the history of decoded samples that the live stream
+(or a replay) produces (spec v2 §26O, §46A). It reads the bounded
+time-series store and never decodes anything itself; with no stream running
+it shows the history that is still buffered, or "no samples yet".
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Parameter: [IAS [kt] ▼]  Window: [30 seconds ▼]  [Pause graph] [Clear history] │
+├──────────────────────────────────────────────┬───────────────────────────┤
+│ kt                                           │ Selected parameter        │
+│ 180 |                        ╭──             │  Current: 167.25 kt       │
+│ 160 |           ╭────────────╯               │  Raw:     669 (0x29D)     │
+│ 140 |──────╮╭───╯                            │  Min:     145             │
+│     +---------------------------- elapsed (s)│  Max:     171.25          │
+│    -30      -20       -10        0           │  Average: 158.9           │
+│                                              │  Samples: 30              │
+│                                              │  Status:  VALID           │
+│                                              ├───────────────────────────┤
+│                                              │ Overlay (same unit only)  │
+│                                              │  ☐ IAS #2   ☑ GROUND SPD  │
+└──────────────────────────────────────────────┴───────────────────────────┘
+```
+
+| Control | Effect |
+| --- | --- |
+| Parameter | Every dataframe parameter with a known type, labelled `mnemonic [unit]`, plus any series the store still holds from another dataframe. Discretes plot as 0/1. |
+| Window | 10 seconds, 30 seconds, 1 minute, 5 minutes, 10 minutes, All buffered. The x axis counts seconds back from the newest sample. |
+| Pause graph / Resume graph | Freezes the view at the current end time. Acquisition, decoding and recording continue (the legend says so); resuming shows what happened meanwhile. |
+| Clear history | Empties the time-series store for every parameter. |
+| Overlay | Check boxes for the parameters that share the selected parameter's unit; each checked one is drawn in its own colour with a legend. Parameters with another unit are not offered, so one y axis never mixes units (spec v2 §26P). |
+| Show sample status in legend | Adds the latest sample's decode status to each legend entry (`IAS · VALID`) and keeps the legend visible even for a single series, so a parameter that stopped decoding cleanly is visible on the plot itself, not only in the Status row. |
+
+The **Selected parameter** box shows the latest sample's engineering value
+with its unit, its raw value (decimal and hex), the minimum, maximum and
+average over the visible window, the number of samples in that window, and
+the latest sample's decode status. A parameter whose latest sample has a
+non-numeric status (for example `INVALID_MAPPING`) shows that status and
+adds no point.
+
+The y axis auto-ranges over the visible samples with 5 % headroom; the plot
+redraws at most ten times a second and only when new samples arrived. The
+history is bounded to 10,000 samples or 10 minutes per parameter, whichever
+is reached first (spec v2 §26N).
+
 ## Dataframe
+
+![Dataframe page](../img/mockups_with_data/dataframe_data.png)
+
+*Metadata line, parameter tree, details pane and the validation issues of the loaded dataframe (14 warnings from the scanned document).*
+
 
 The Dataframe page is where a dataframe is browsed, inspected and edited.
 
@@ -178,31 +318,130 @@ Every committed edit re-decodes the current frame immediately. Edited
 parameters keep their preserved raw fields, so an edited `.adb` import still
 round-trips.
 
-## Simulator
+## Hardware
 
-Three modes are available from the mode selector.
+![Hardware page before connecting](../img/mockups_no_data/hardware.png)
 
-**Random.** Generates a RAW RANDOM frame; an optional seed makes the frame
-reproducible.
+*Before connecting: port, baud, protocol and virtual speed are editable; everything else waits for a connection.*
 
-**Manual.** Creates a blank frame, optionally with the dataframe's sync words
-in word 1 of each subframe, for editing word by word in the Frame View.
+![Hardware page connected](../img/mockups_with_data/hardware_data.png)
 
-**Scenario.** Lists every parameter that can be safely encoded (a known type
-with a mapping and, for analog and BCD types, a linear conversion with a
-non-zero resolution). Enter a target engineering value per parameter, or pick
-a state for discretes; blank entries are left alone. **Apply Scenario**
-encodes the requested values into a fresh blank frame with sync words, or
-into a copy of the current frame when *Start from current frame* is checked,
-and writes every occurrence in every subframe. The results table then shows,
-per parameter, the requested value, the raw bit pattern written, the value
-the decoder read back, the difference, the quantization tolerance (half a
-resolution step for analog and BCD, exact for discretes and raw), and
-PASS/FAIL. This is the closed-loop check of spec §26: a value that cannot
-survive encode → decode within one quantization step indicates a mapping or
-conversion problem.
+*Connected to the virtual device and paused: stream progress, simulated signals, diagnostics and the event log.*
+
+
+The Hardware page connects the application to the STM32 stream emulator, or
+to its in-process twin, and shows what the stream is doing (spec v2 §26S,
+§46B). Every action goes through the serial service; the page only renders
+the stream state. A dataframe must be loaded first: its WPS and sync words
+are sent to the device.
+
+**Connection.**
+
+| Control | Meaning |
+| --- | --- |
+| Port | `VIRTUAL` (the in-process device) followed by every serial port pyserial can see (`/dev/ttyUSB0`, `COM7`, with its description). **Refresh** rescans; a port name can also be typed. |
+| Baud | 9600 to 921600; the link is always 8 data bits, no parity, one stop bit. The firmware runs at 115200. |
+| Protocol | `SIM-A717 v1 · continuous word stream` (normal) or `SIM-A717 v1 · framed packets (diagnostics)`. See [12](12-sim-a717-protocol.md). |
+| Virtual speed | Time factor for the virtual device only (1× is real time). |
+| Status | `DISCONNECTED`, `CONNECTING`, `CONNECTED`, `STREAMING`, `RECONNECTING`, `REPLAYING`, coloured; after a failure the reason follows the state. The device's `INFO` line appears below while connected. |
+| Connect | Opens the port and runs the handshake: `STOP`, `PING`, then WPS, sync words, protocol and signal source are configured. Fails with `SERIAL_PORT_ERROR` when the port cannot be opened or nothing answers, `INVALID_SIM_PROTOCOL` when the answer is not a SIM-A717 device. |
+| Disconnect | Stops the stream if needed and closes the port. |
+| Start stream / Stop stream | `START` / `STOP` on the device; the toolbar's ▶ Start stream and ❚❚ Pause stream are the same actions. Stopping leaves the last frame in the Frame View as a static frame. |
+| Reset device | Stops the stream, sends `RESET`, re-sends the configuration and clears the diagnostics. |
+
+Port, baud, protocol and speed can only be changed while disconnected. If
+the port disappears while connected (cable pulled, board reset), the status
+turns `RECONNECTING`, the service retries every half second, and the stream
+restarts by itself once the device answers again; **Disconnect** gives up.
+
+**Stream.** WPS; the frame index being assembled; the subframe being
+received (`2 / 4`) followed by the state of all four slots
+(`SF1:rece SF2:pend …`); the words received so far in that subframe
+(`162 / 256`); the measured rate in words per second over the last two
+seconds (or the replay position while replaying); and the synchronizer
+state, `SEARCHING` or `LOCKED`, with a hint such as "sync spacing looks like
+128 WPS" when the sync words repeat at another rate than the dataframe
+declares.
+
+**Simulated signals.** The *Source* selector decides what the device
+streams:
+
+| Source | Behaviour |
+| --- | --- |
+| PC: engineering signals (encoded through the dataframe) | Default. The PC generates an engineering value per parameter and subframe, encodes it with the normal parameter encoder and uploads one frame ahead to the device, so the decoded stream is coherent with the dataframe (spec v2 §26H "Engineering Random"). |
+| Device: raw random walk | The device itself steps every word by −8..+8 per emission. Engineering values are meaningless; for parser and Frame View testing. |
+| Device: raw random | Uniform random words (spec v2 §26H "Raw Random"). |
+| Device: fixed frame | The device repeats its current frame buffer. |
+
+The table below the selector is active for the PC source and has one row per
+encodable parameter (a known type with a mapping and, for analog and BCD
+types, a non-zero resolution):
+
+| Column | Meaning |
+| --- | --- |
+| Mode | Fixed, Uniform Random, Random Walk (default), Sine, Ramp, Step, Scripted. |
+| Low, High | Bounds for every mode. Defaults come from the parameter's declared range, clipped to what its mapping can actually encode. |
+| Value | The Fixed value; the starting point of a Random Walk or a Step. |
+| Period (s) | Sine period, Ramp duration, Step interval, in seconds of simulated time. |
+| Script (t:v, …) | Points for the Scripted mode as `time:value` pairs, for example `0:100, 40:300, 80:100`; values between points are interpolated linearly and held beyond the ends. A malformed script turns the cell red with the error as its tooltip and keeps the previous points. |
+
+Edits apply at once; the next uploaded frame uses them. Discretes default to
+a Step between their two states every 5 s. A value outside what the mapping
+can encode is reported once in the event log as `ENCODE_ERROR`; adjust Low
+and High.
+
+**Diagnostics.** Bytes, words, subframes and frames received; sync losses;
+invalid words (mis-aligned or corrupted containers); invalid subframes;
+dropped subframes (slots marked missing); out-of-order subframes; bad
+packets (framed mode); discarded bytes. **Reset device** clears them.
+
+**Fault injection** (spec v2 §26J). Choose a fault, a count (1 by default;
+0 disarms, 65535 means continuous) and press **Inject**. The faults and
+their visible effects are listed in [12](12-sim-a717-protocol.md#faults-fault);
+`DISCONNECT_RECONNECT` exists only on the virtual device and is the way to
+watch the automatic reconnection.
+
+**Stream events.** The last 200 events with time, kind and message:
+connection changes, replies during the handshake, `STREAM_STARTED`,
+`STREAM_SYNC_LOCKED`, `STREAM_SYNC_LOST`, `STREAM_RATE_MISMATCH`,
+`SUBFRAME_INCOMPLETE`, `FRAME_INCOMPLETE`, `FAULT_INJECTED`,
+`SERIAL_DISCONNECTED`, `RECONNECTED`, `REPLAY_STARTED`, `REPLAY_FINISHED`,
+`ENCODE_ERROR`. Losses, errors and disconnections are red, incomplete data,
+mismatches and injected faults orange.
+
+## Recording and replay
+
+Recording and replay (spec v2 §26R, §46C) are in the File menu and work on
+whatever stream is running, live or replayed.
+
+| Entry | Availability | Effect |
+| --- | --- | --- |
+| Record Session… | A device is connected (or a replay runs) and nothing is being recorded or replayed | Asks for a file name (`.a717session` is appended) and records every received subframe, every decoded sample and every stream event from that moment on. |
+| Stop Recording | While recording | Closes the file; the status bar shows `Recorded name.a717session` for a few seconds. |
+| Replay Session… | Nothing is being recorded or replayed | Asks for a session file and replays it at the speed chosen in **Replay Speed** (0.25× to 10×, set before starting). A connected device is disconnected first; the replay takes the place of the live source. |
+| Pause Replay / Stop Replay | While replaying | Hold the replay in place (the toolbar's ❚❚ Pause stream does the same, and ▶ Start stream resumes), or end it. |
+
+While recording, the status bar shows `● REC`. While replaying it shows
+`▶ REPLAY`, the toolbar shows the position (`REPLAY 3.2 / 12.0 s`), the
+header reads `Source: REPLAY (live)` and the Hardware page `REPLAYING`; the
+Frame View, Parameters and Graphs pages behave exactly as during a live
+stream because the recorded subframes go through the same decoder. When the
+file ends the source detaches and the stream state returns to `—`.
+
+A session remembers the dataframe name, WPS, sync words, source, port, baud,
+protocol and simulator settings. Replay refuses a file whose WPS differs
+from the loaded dataframe (`REPLAY_ERROR`) and logs a warning when the
+dataframe name differs; a file cut short by a crash replays up to its last
+complete record. The format is described in
+[08 — File formats](08-file-formats-and-storage.md#session-files) and
+[13](13-live-streaming-graphs-recording.md#recording).
 
 ## Import
+
+![Import page after a PDF import](../img/mockups_with_data/import_data.png)
+
+*After publishing a PDF import: the review queue reports what was loaded and the validation results list the warnings.*
+
 
 **ADB dataframes.** Import ADB…, Export ADB…, Load Demo Dataframe, New
 Dataframe…. Import errors are shown in a message box with the parser's
@@ -220,6 +459,21 @@ publishing, the line reports what was loaded.
 
 **Validation results.** The current dataframe's summary and issues.
 
+## Help
+
+![Help tab](../img/mockups_no_data/help.png)
+
+*The Help tab: section list, search box and the guide with its table of contents.*
+
+
+The last tab is the in-application user guide: a section list on the left
+(Overview, Getting started, the main window and menus, one section per page
+and dialog, recording and replay, connecting the STM32 board, the messages
+the application can show, a glossary), the guide itself on the right, and a
+search box above (**Find next** jumps to the next match and wraps around).
+Help → User Guide or **F1** opens it from anywhere; links inside the guide
+jump between sections.
+
 ## Step-by-step workflows
 
 ### Inspect a dataframe and a frame
@@ -228,9 +482,9 @@ publishing, the line reports what was loaded.
    Dataframe).
 2. Dataframe tab: expand a parameter to see its mapping; read the details
    panel for the source record.
-3. Simulator tab → Manual → Create Blank Frame (sync words inserted).
-4. Frame View tab: double-click SF1 word 004, enter `D54` (HEX), OK. The
-   inspector shows `PITCH ATT #1` decoding to −30.096 deg.
+3. Frame View tab → Clear Frame (all words zero).
+4. Double-click SF1 word 004, enter `D54` (HEX), OK. The inspector shows
+   `PITCH ATT #1` decoding to −30.096 deg.
 5. Parameters tab: filter Status = `VALID`, select the pitch row, read the
    trace.
 6. Frame View → Save Frame… to keep the frame as JSON.
@@ -243,16 +497,29 @@ publishing, the line reports what was loaded.
 3. Repeat; use Duplicate for similar parameters.
 4. Export ADB… when done. The `*` marker disappears.
 
-### Verify a mapping with a scenario
+### Check a mapping with a known word
 
-1. Load the dataframe, then Simulator → Scenario.
-2. Enter target values (for example pitch −20, airspeed 150, gear DOWN).
-3. Apply Scenario; every row should show PASS with a difference below the
-   tolerance. A FAIL means the encoder and decoder disagree about the
-   mapping, which points at overlapping fields, a wrong sign convention, or a
-   segment order problem.
+1. Load the dataframe, Frame View → Clear Frame.
+2. Take a word whose meaning you know from the dataframe document (a
+   published test pattern, or a value you encode by hand from resolution and
+   offset) and enter it with a double-click on that cell.
+3. Read the Word Inspector: the extracted bits, the decoded decimal and the
+   engineering value must match your expectation. A wrong value points at the
+   bit range, the sign convention, the resolution or offset, or the segment
+   order of the parameter; fix it on the Dataframe page and the inspector
+   re-decodes at once.
+
+The live stream is a continuous version of the same check: with the default
+"PC: engineering signals" source the values are encoded through the
+dataframe and decoded back, so a parameter whose mapping is wrong shows
+implausible values or a non-`VALID` status on the Parameters page.
 
 ### Import a dataframe document (PDF)
+
+![PDF review dialog](../img/mockups_no_data/pdf_import_review.png)
+
+*The review dialog: rows in green are approved, the selected row needs review because its resolution cell held two numbers.*
+
 
 1. File → Import PDF…, choose the document, wait for the progress dialog.
 2. In the review dialog confirm WPS and sync words (Apply Metadata), then
@@ -264,3 +531,54 @@ publishing, the line reports what was loaded.
 
 The review dialog is described in detail in
 [07 — PDF import](07-pdf-import.md#the-review-dialog).
+
+### Stream from the virtual device and graph a parameter
+
+1. Load a dataframe (Import → Load Demo Dataframe).
+2. Press **▶ Start stream** in the toolbar. Nothing being connected yet, it
+   connects to the port selected on the Hardware page (`VIRTUAL` by default,
+   *Source* "PC: engineering signals") and starts the stream; the Hardware
+   page shows `STREAMING`, the device's `INFO` line and the handshake
+   replies in the event log. (Hardware → **Connect**, then **Start stream**
+   does the same in two steps.)
+3. The Frame View updates one subframe column per second with `SF1 ·
+   received`, `SF2 · pending` headers, the other columns keeping their last
+   words; the Stream box counts words and frames; the Parameters page
+   updates subframe by subframe.
+4. Graphs tab: choose `IAS [kt]`, window 30 seconds. Switch to
+   `PITCH ATT #1 [deg]` and tick `ROLL ATT` in the overlay list. Press
+   **Pause graph**, wait, **Resume graph**: the missed seconds are there.
+5. Hardware tab → Fault injection: `DROP_SUBFRAME`, count 1, **Inject**.
+   The event log shows `FAULT_INJECTED`, `SUBFRAME_INCOMPLETE`,
+   `STREAM_SYNC_LOST` and `STREAM_SYNC_LOCKED`; the Frame View shows the
+   affected slot in red.
+6. **❚❚ Pause stream**: the last frame stays as a static frame with every
+   subframe's last words; double-click a cell to edit it, or File → Save
+   Frame…. **▶ Start stream** resumes (the frame counter restarts at 0).
+   Hardware → **Disconnect** closes the port.
+
+### Connect the STM32 board
+
+1. Build and flash the firmware and wire PA9 → RXD, PA10 ← TXD, GND (see the
+   [firmware README](../firmware/stm32f103_sim_a717/README.md)).
+2. Load the dataframe the board should stream.
+3. Hardware tab → **Refresh**, pick the FTDI port (`/dev/ttyUSB0` on Linux,
+   `COMn` on Windows), baud 115200, protocol "continuous word stream",
+   **Connect**. The `INFO` line ends in `fw=1.0`.
+4. **▶ Start stream** (toolbar or Hardware page) and continue as with the
+   virtual device. Pull the USB cable to see `RECONNECTING`; plug it back
+   and the stream resumes.
+
+If **Connect** fails, see [10 — Troubleshooting](10-troubleshooting.md#live-stream-hardware-page).
+
+### Record and replay a session
+
+1. With a device connected and the stream running, File → **Record
+   Session…** and choose a file name. The status bar shows `● REC`.
+2. Let it run for a while; File → **Stop Recording**. The status bar shows
+   `Recorded name.a717session`.
+3. Choose File → **Replay Speed** if you want, then File → **Replay
+   Session…** and pick the file. The Frame View, Parameters and Graphs pages
+   replay the session; **❚❚ Pause stream** (or File → Pause Replay) holds it,
+   **▶ Start stream** resumes it, File → **Stop Replay** ends it. At the end
+   the stream state returns to `—`.

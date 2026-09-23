@@ -33,7 +33,14 @@ class DecodingService:
         frame_store.subscribe(self._on_store_event)
 
     def _on_store_event(self, event: dict) -> None:
+        if event.get("live"):
+            # A frame under live reception is decoded per subframe by the
+            # streaming service (spec v2 §26G); a whole-frame decode here
+            # would publish values from subframes that have not arrived.
+            return
         if event.get("type") in ("dataframe", "frame", "word"):
+            if event.get("type") == "dataframe" and self._frame_store.live:
+                return
             self.redecode()
 
     def redecode(self) -> None:

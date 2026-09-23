@@ -68,11 +68,14 @@ class ParameterEncoder:
         parameter: ParameterDefinition,
         value: int | float | str | bool,
         occurrence_index: int | None = None,
+        only_subframes=None,
     ) -> int:
         """Encode ``value`` into the frame; returns the raw bit pattern written.
 
         By default every occurrence (and every subframe of each segment) is
         written, so a subsequent decode of any sample returns the value.
+        ``only_subframes`` restricts the write to those subframes, which is
+        how the live simulator gives each subframe its own sample value.
         """
         occurrences = [
             occ
@@ -85,8 +88,9 @@ class ParameterEncoder:
                 f"(requested index {occurrence_index!r})"
             )
         pattern = 0
+        selected = set(only_subframes) if only_subframes is not None else None
         for occurrence in occurrences:
-            pattern = self._encode_occurrence(frame, parameter, occurrence, value)
+            pattern = self._encode_occurrence(frame, parameter, occurrence, value, selected)
         return pattern
 
     def _encode_occurrence(
@@ -95,6 +99,7 @@ class ParameterEncoder:
         parameter: ParameterDefinition,
         occurrence: ParameterOccurrence,
         value: int | float | str | bool,
+        only_subframes: set[int] | None = None,
     ) -> int:
         segments = sorted(occurrence.segments, key=lambda s: s.sequence)
         if not segments:
@@ -117,6 +122,8 @@ class ParameterEncoder:
                 ) from exc
             mask = ((1 << segment.width) - 1) << (lo - 1)
             for subframe in segment.subframes:
+                if only_subframes is not None and subframe not in only_subframes:
+                    continue
                 if not 1 <= segment.word <= frame.wps:
                     raise EncodeError(
                         f"{parameter.mnemonic}: word {segment.word} outside 1..{frame.wps}"

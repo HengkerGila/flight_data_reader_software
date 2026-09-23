@@ -8,6 +8,9 @@
 | Frame | `Arinc717Frame` in the frame store | Frame JSON file |
 | Engineering values | `EngineeringValue` list in the engineering store | Not persisted; recomputed from frame + dataframe |
 | PDF import session | `ImportSession` held by the Import page until published | Not persisted; publish to make it a dataframe |
+| Stream state | `StreamStore`: connection, progress, diagnostics snapshot, last 200 events | Not persisted |
+| Parameter samples | `TimeSeriesStore` ring buffers, at most 10,000 samples or 10 minutes per parameter | Not persisted as such; written as `sample` records while a session is recorded |
+| Recorded session | `.a717session` file written line by line while recording | The file itself; replay reads it back |
 
 ## Frame files
 
@@ -34,6 +37,31 @@ Loading validates the `format` tag and every value and raises
 frame service additionally refuses a frame whose WPS differs from the loaded
 dataframe (`DATAFRAME_WPS_MISMATCH`), because word addresses would not line
 up with the mapping.
+
+## Session files
+
+A recording of a live stream (or of a replay) is a `.a717session` file
+written by `arinc717_reader/recording/session.py` in **JSON Lines**: one
+JSON object per line, appended as data arrives, so nothing is held in memory
+and a file cut short by a crash is still readable up to its last complete
+line.
+
+| Line | Content |
+| --- | --- |
+| 1 | The header: `format` (`arinc717-session`), `version` (1), `created`, `dataframe_name`, `dataframe_source`, `dataframe_hash`, `wps`, `sync_words`, `source_type` (`serial`, `virtual`, `replay`), `port`, `baudrate`, `protocol_mode`, `simulator` (signal source, device mode, the device's `INFO` line), `notes` |
+| `{"kind": "subframe", …}` | One per received subframe: `t` (arrival time, seconds since the epoch), `frame`, `sf`, `state` (`RECEIVED`, `INVALID`, `LATE`), `words` (every word of the subframe as 3 hexadecimal characters, `247` `000` `D54` …) |
+| `{"kind": "sample", …}` | One per decoded sample: `t`, `id`, `name`, `frame`, `sf`, `occ`, `raw`, `dec`, `eng`, `unit`, `status` |
+| `{"kind": "event", …}` | One per stream event: `t`, `event`, `message` |
+| `{"kind": "end", …}` | Written once when the recording is stopped: `subframes`, `samples`, `events`, `first_t`, `last_t` |
+
+Replay uses the header and the `subframe` records only and re-decodes them
+through the normal pipeline; the `sample` records document what was decoded
+at recording time. `SessionReader` rejects a file without the format tag or
+with another version (`REPLAY_ERROR`), and the recording service refuses to
+replay a session whose `wps` differs from the loaded dataframe. Word strings
+that are not a multiple of three characters are a `REPLAY_ERROR` as well.
+Worked examples and the replay timing are in
+[13 — Live streaming, graphs and recording](13-live-streaming-graphs-recording.md#recording).
 
 ## The SQLite repository
 

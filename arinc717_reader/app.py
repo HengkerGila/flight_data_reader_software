@@ -17,10 +17,16 @@ from pathlib import Path
 from .services.dataframe_service import DataframeService
 from .services.decoding_service import DecodingService
 from .services.frame_service import FrameService
+from .services.recording_service import RecordingService
+from .services.serial_service import SerialService
 from .services.simulation_service import SimulationService
+from .services.streaming_service import StreamingService
 from .state.dataframe_store import DataframeStore
 from .state.engineering_store import EngineeringStore
 from .state.frame_store import FrameStore
+from .state.stream_store import StreamStore
+from .streaming.sample_bus import ParameterSampleBus
+from .streaming.timeseries_store import TimeSeriesStore
 
 
 @dataclass
@@ -28,20 +34,49 @@ class AppContext:
     dataframe_store: DataframeStore
     frame_store: FrameStore
     engineering_store: EngineeringStore
+    stream_store: StreamStore
+    timeseries_store: TimeSeriesStore
+    sample_bus: ParameterSampleBus
     dataframe_service: DataframeService
     frame_service: FrameService
     decoding_service: DecodingService
     simulation_service: SimulationService
+    serial_service: SerialService
+    streaming_service: StreamingService
+    recording_service: RecordingService
+
+    def pump(self) -> int:
+        """Drain stream events onto the stores (GUI timer / test loops)."""
+        return self.serial_service.pump()
+
+    def shutdown(self) -> None:
+        self.recording_service.stop_recording()
+        self.recording_service.stop_replay()
+        self.serial_service.disconnect()
 
 
 def build_context() -> AppContext:
     dataframe_store = DataframeStore()
     frame_store = FrameStore()
     engineering_store = EngineeringStore()
+    stream_store = StreamStore()
+    timeseries_store = TimeSeriesStore()
+    sample_bus = ParameterSampleBus()
+    serial_service = SerialService(dataframe_store, frame_store, stream_store)
+    streaming_service = StreamingService(
+        dataframe_store, engineering_store, sample_bus, timeseries_store
+    )
+    serial_service.arrival_listeners.append(streaming_service.on_arrival)
+    recording_service = RecordingService(
+        dataframe_store, stream_store, serial_service, sample_bus
+    )
     return AppContext(
         dataframe_store=dataframe_store,
         frame_store=frame_store,
         engineering_store=engineering_store,
+        stream_store=stream_store,
+        timeseries_store=timeseries_store,
+        sample_bus=sample_bus,
         dataframe_service=DataframeService(dataframe_store),
         frame_service=FrameService(frame_store, dataframe_store),
         decoding_service=DecodingService(
@@ -50,6 +85,9 @@ def build_context() -> AppContext:
         simulation_service=SimulationService(
             dataframe_store, frame_store, engineering_store
         ),
+        serial_service=serial_service,
+        streaming_service=streaming_service,
+        recording_service=recording_service,
     )
 
 
@@ -133,6 +171,34 @@ def selftest(argv: list[str]) -> int:
         assert not diffs, diffs
         return f"{len(parsed.parameters)} parameters"
 
+    @check("virtual HIL stream (SIM-A717 v1, live decoding)")
+    def _hil():
+        import time as _time
+
+        from .sources.serial.transport import pyserial_available
+
+        assert pyserial_available(), "pyserial not bundled"
+        ctx = build_context()
+        ctx.dataframe_service.set_dataframe(build_demo_dataframe())
+        try:
+            ctx.serial_service.connect("VIRTUAL", virtual_speed=200.0)
+            ctx.serial_service.start_stream()
+            deadline = _time.monotonic() + 15.0
+            while ctx.stream_store.diagnostics.frames_received < 2:
+                ctx.pump()
+                assert _time.monotonic() < deadline, "no frames from the virtual device"
+                _time.sleep(0.005)
+            diag = ctx.stream_store.diagnostics
+            assert diag.sync_state == "LOCKED" and diag.sync_losses == 0, diag
+            ias = ctx.timeseries_store.stats("demo-ias")
+            assert ias.count >= 4, ias
+            return (
+                f"{diag.frames_received} frames, {ctx.sample_bus.published} samples, "
+                f"IAS {ias.current:.1f} kt"
+            )
+        finally:
+            ctx.shutdown()
+
     @check("Qt GUI construction (offscreen)")
     def _gui():
         from PySide6.QtWidgets import QApplication
@@ -191,10 +257,14 @@ def main(argv: list[str] | None = None) -> int:
 
     from .ui.main_window import MainWindow
 
+    from .ui.theme import ThemeManager, load_theme_preference
+
     configure_logging()
     app = QApplication(argv)
+    theme = ThemeManager(app)
+    theme.apply(load_theme_preference())
     ctx = build_context()
-    window = MainWindow(ctx)
+    window = MainWindow(ctx, theme_manager=theme)
 
     if len(argv) > 1:
         try:

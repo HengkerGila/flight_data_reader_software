@@ -63,9 +63,87 @@ inspector.show_word(1, 4)
 text = inspector._text.toPlainText()
 assert "PITCH ATT #1" in text and "1101010101" in text, text[:400]
 
+# The inspector follows the current cell: arrow keys, not only mouse clicks.
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+fv = window.frame_view_page
+assert fv.select_cell(1, 3) and fv.current_cell() == (1, 3)
+assert "Word Address   : 003" in inspector._text.toPlainText()
+QTest.keyClick(fv._table, Qt.Key.Key_Down)          # word 3 -> word 4
+app.processEvents()
+assert fv.current_cell() == (1, 4)
+text = inspector._text.toPlainText()
+assert "Word Address   : 004" in text and "PITCH ATT #1" in text, text[:400]
+QTest.keyClick(fv._table, Qt.Key.Key_Right)         # SF1 -> SF2
+app.processEvents()
+assert fv.current_cell() == (2, 4)
+assert "Subframe       : 2" in inspector._text.toPlainText()
+ctx.frame_service.new_random(seed=2)                # same shape: cell kept
+app.processEvents()
+assert fv.current_cell() == (2, 4)
+ctx.frame_service.new_blank(with_sync_words=True)   # back to the blank frame for the checks below
+ctx.frame_service.set_word(1, 4, 3412)
+app.processEvents()
+assert fv.current_cell() == (2, 4)
+
+# The current cell's row is tinted (other columns of word 4 differ from word 5).
+def cell_pixel(row, column):
+    rect = fv._table.visualRect(fv._model.index(row, column))
+    image = fv._table.viewport().grab().toImage()
+    return image.pixelColor(rect.left() + 3, rect.center().y()).name()
+same_row, other_row, selected = cell_pixel(3, 0), cell_pixel(4, 0), cell_pixel(3, 1)
+assert same_row != other_row, (same_row, other_row)
+assert selected not in (same_row, other_row), (selected, same_row, other_row)
+
 # Engineering table shows one row per decoded sample
 assert window.parameters_page._model.rowCount() == len(ctx.engineering_store.values)
 assert model.rowCount() == 256
+
+# Parameters page: the selected row, its trace and the column widths survive
+# value updates (in place) and shape changes (re-selected by sample key).
+ppage = window.parameters_page
+ptable, pmodel = ppage._table, ppage._model
+key = ("demo-ias", 1, 2)
+assert ppage.select_sample(key) and ppage.current_key() == key
+assert "Engineering    : 0 kt" in ppage._trace.toPlainText(), ppage._trace.toPlainText()
+widths = [ptable.columnWidth(c) for c in range(pmodel.columnCount())]
+row_before = ptable.currentIndex().row()
+ctx.frame_service.set_word(2, 7, 400)               # same rows: refreshed in place
+app.processEvents()
+assert ppage.current_key() == key and ptable.currentIndex().row() == row_before
+assert "Engineering    : 100 kt" in ppage._trace.toPlainText(), ppage._trace.toPlainText()
+assert [ptable.columnWidth(c) for c in range(pmodel.columnCount())] == widths
+ctx.dataframe_service.remove_parameter("demo-roll")  # rows shift: the selection follows the sample
+app.processEvents()
+assert ppage.current_key() == key and ptable.currentIndex().row() == row_before - 4
+assert "Engineering    : 100 kt" in ppage._trace.toPlainText()
+assert [ptable.columnWidth(c) for c in range(pmodel.columnCount())] == widths
+
+# Show in Frame View: the sample's words stacked one row per segment above the
+# inspector, its cells outlined in the grid, the first one selected.
+bits = fv.parameter_bits
+assert not bits._table.isVisible() and not bits._clear.isVisible()
+assert ppage.select_sample(("demo-altitude", 1, 1)) and ppage._show_button.isEnabled()
+assert ppage.request_frame_view()
+app.processEvents()
+assert window.tabs.currentWidget() is fv
+assert bits.segments() == [(1, 1, 154, 9, 1), (2, 1, 153, 12, 1)], bits.segments()
+assert bits._table.isVisible() and bits._table.rowCount() == 2
+assert fv.current_cell() == (1, 154) and fv.linked_cells() == {(1, 154), (1, 153)}
+assert "PRESS ALT" in bits._summary.text() and "Assembled" in bits._assembled.text()
+ctx.frame_service.set_word(1, 153, 0xA5A)          # the bits follow the frame
+app.processEvents()
+assert bits.bit_text(1) == "101001011010", bits.bit_text(1)
+assert bits.highlighted_bits(1) == set(range(1, 13)) and bits.highlighted_bits(0) == set(range(1, 10))
+value_cell = bits._table.item(1, bits._table.columnCount() - 1)
+assert value_cell.text() == "2650" and "101001011010" in value_cell.toolTip()
+assert "2650" in bits._assembled.text()
+bits.activate_row(1)                                # a segment row selects its word in the grid
+assert fv.current_cell() == (1, 153)
+assert "Word Address   : 153" in inspector._text.toPlainText()
+bits.show_sample(None)
+app.processEvents()
+assert not bits._table.isVisible() and fv.linked_cells() == frozenset()
 
 # Scenario: closed-loop through the simulation service
 raws = ctx.simulation_service.apply_scenario({"demo-pitch": -20.0, "demo-gear": "DOWN"})
@@ -148,7 +226,20 @@ if importlib.util.find_spec("pymupdf") is not None:
     dlg._filter.setCurrentText("Needs review")
     visible = [r for r in range(dlg._table.rowCount()) if not dlg._table.isRowHidden(r)]
     assert len(visible) == 1, visible
+    # Ctrl+A (or a Shift+click range) also selects rows the filter hides;
+    # the actions must only touch the visible rows.
+    dlg._table.selectAll()
+    app.processEvents()
+    assert dlg.selected_indexes() == [11], dlg.selected_indexes()
+    assert not any(dlg._table.isRowHidden(i.row()) for i in dlg._table.selectionModel().selectedRows())
+    approved_before = session.state_counts()["APPROVED"]
+    dlg._toggle_exclude_selected()                       # excludes SPARE 15 only
+    assert session.items[11].excluded and session.state_counts()["APPROVED"] == approved_before
+    assert session.state_counts()["EXCLUDED"] == 1
+    session.include(11)
+    dlg._rebuild()
     dlg.select_visible()                                 # bulk approve of the filtered rows
+    assert dlg._approve_button.text() == "Approve Selected" and dlg._exclude_button.text() == "Exclude"
     details = dlg._details.toPlainText()
     assert "Verbatim extraction" in details and "normalize.type" in details, details[:600]
     dlg._approve_selected()

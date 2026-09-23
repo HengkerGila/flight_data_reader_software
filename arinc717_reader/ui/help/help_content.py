@@ -26,7 +26,7 @@ class HelpSection:
 
 @dataclass(frozen=True)
 class Figure:
-    file: str  # relative to the image directory, e.g. "mockups_with_data/graphs_data.png"
+    file: str  # relative to the image directory, e.g. "mockups/graphs.png"
     caption: str
 
 
@@ -40,61 +40,76 @@ def help_images_dir() -> Path:
 
 
 # Screenshots shown under a section's heading, when the files are available.
+# All were taken with the FDS81 dataframe (imported from the reference PDF)
+# during a live stream from the virtual device.
 FIGURES: dict[str, list[Figure]] = {
     "overview": [
         Figure(
-            "mockups_with_data/frame_view_data.png",
-            "The main window with the FDS81 dataframe (imported from a PDF) and a paused virtual stream: "
-            "toolbar, header line, tabs, the Frame View and the status bar.",
+            "mockups/frame_view.png",
+            "The main window during a live stream: toolbar with the stream state, header line, tabs, "
+            "the Frame View with the Parameter Bits panel and the Word Inspector, and the status bar.",
         )
     ],
     "getting-started": [
-        Figure("mockups_no_data/import.png", "The Import tab before anything is loaded: Load Demo Dataframe is the first step.")
+        Figure(
+            "mockups/import.png",
+            "The Import tab: Load Demo Dataframe (or Import ADB… / Import PDF…) is the first step; "
+            "here after publishing a PDF import, with the validation results of the loaded dataframe.",
+        )
     ],
     "frame-view": [
         Figure(
-            "mockups_with_data/frame_view_data.png",
-            "Frame View after ❚❚ Pause stream: a static frame, word addresses down the side, SF1–SF4 across, HEX representation.",
+            "mockups/frame_view.png",
+            "Frame View during a stream: SF1 and SF2 of the current frame received, SF3 and SF4 pending "
+            "(still showing the previous frame's words), HEX representation.",
+        )
+    ],
+    "parameter-bits": [
+        Figure(
+            "mockups/frame_view.png",
+            "The Parameter Bits panel above the Word Inspector: the word behind the 28VDC Power Input "
+            "sample, its twelve bits with the parameter's bits highlighted, and the assembled value.",
         )
     ],
     "parameters": [
         Figure(
-            "mockups_with_data/parameters_data.png",
-            "Parameters: one row per decoded sample; the selected row's decode trace is shown underneath.",
+            "mockups/parameters.png",
+            "Parameters during a stream: one row per decoded sample refreshed in place, the selected "
+            "row's decode trace underneath, and Show in Frame View at the right of the filter row.",
         )
     ],
     "graphs": [
         Figure(
-            "mockups_with_data/graphs_data.png",
-            "Graphs: a 30-second window of one parameter with the statistics box and the same-unit overlay list.",
+            "mockups/graphs.png",
+            "Graphs: a 30-second window of the AOAR parameter with the statistics box and the same-unit overlay list.",
         )
     ],
     "dataframe": [
         Figure(
-            "mockups_with_data/dataframe_data.png",
-            "Dataframe: metadata, the parameter tree, the details pane and the validation issues of the loaded dataframe.",
+            "mockups/dataframe.png",
+            "Dataframe: metadata, the parameter tree, the details pane with mapping and provenance, and the validation issues.",
         )
     ],
     "hardware": [
-        Figure("mockups_no_data/hardware.png", "Hardware page before connecting: port, baud, protocol and virtual speed are editable."),
         Figure(
-            "mockups_with_data/hardware_data.png",
-            "Connected to the virtual device: stream progress, the simulated-signal table, diagnostics and the event log with the handshake replies.",
+            "mockups/hardware.png",
+            "Hardware page connected to the virtual device and streaming: stream progress, the "
+            "simulated-signal table, diagnostics, fault injection and the event log with the handshake replies.",
         ),
     ],
     "import": [
         Figure(
-            "mockups_with_data/import_data.png",
+            "mockups/import.png",
             "Import after publishing a PDF import: the review queue line and the validation results of the loaded dataframe.",
         )
     ],
     "pdf-review": [
         Figure(
-            "mockups_no_data/pdf_import_review.png",
-            "The PDF review dialog on a scanned 21-page document: document summary, metadata to confirm, conventions, the row table with states and reasons, and the verbatim cells of the selected row.",
+            "mockups/pdf_import_dialogue.png",
+            "The PDF review dialog on the scanned 21-page document: document summary, metadata to confirm, "
+            "conventions, the rows held for review with their reasons, and the verbatim cells of the selected row.",
         )
     ],
-    "help-tab": [Figure("mockups_no_data/help.png", "The Help tab: section list, search box and the guide.")],
 }
 
 
@@ -259,7 +274,7 @@ representation.</p>
                 ["Clear Frame", "Replaces the frame with all-zero words (source MANUAL). Enter sync words and values by editing cells."],
                 ["Load Frame… / Save Frame…", "Frame JSON files, the same as the File menu entries."],
                 ["Representation", "BIN (12 digits), OCT (4 digits), DEC, HEX (3 digits). Changing it never changes the data."],
-                ["Click a cell", "Shows the word in the Word Inspector on the right."],
+                ["Click a cell / arrow keys", "Shows the word in the Word Inspector on the right. The inspector follows the current cell, so after a click the arrow keys walk through the words and the inspector keeps up; the selected cell survives a new frame. The selected cell is highlighted and its whole row is tinted, so the same word address is easy to compare across SF1–SF4."],
                 ["Double-click a cell", "Opens Edit Word. Refused while the stream is live: press ❚❚ Pause stream first."],
             ],
         )
@@ -303,6 +318,24 @@ edit changes exactly that cell and re-decodes the frame immediately.</p>
 """,
     ),
     HelpSection(
+        "parameter-bits",
+        "Parameter Bits panel",
+        2,
+        """
+<p>Above the Word Inspector. It shows the raw words behind one decoded <b>sample</b>
+chosen on the Parameters page (<b>Show in Frame View</b>, or double-click the row):</p>
+<ul>
+<li>A summary line: parameter, occurrence, subframe, type, the engineering value and the status.</li>
+<li>One row per <b>segment</b>, in assembly order (the first row holds the most significant bits): subframe, word address, bit range, then the twelve bits of that word with the bits that belong to the parameter highlighted and the others dimmed, and the extracted bits with their value. A parameter built from several words (a coarse/fine altitude, a word pair) therefore shows all of its words stacked.</li>
+<li>The assembled bits, the decoded decimal, the conversion and the engineering value.</li>
+</ul>
+<p>The words are also outlined in the frame table and the first one is selected, so the
+Word Inspector shows it. Clicking a segment row selects that word instead. The panel follows
+the frame: during a stream the bits change as the sample's subframe arrives, and after an
+edit they update at once. <b>Clear</b> stops following the sample.</p>
+""",
+    ),
+    HelpSection(
         "parameters",
         "Parameters",
         1,
@@ -320,12 +353,17 @@ value, unit, source and status.</p>
                 ["Status", "Show one decode status only (VALID, INVALID_MAPPING, UNSUPPORTED_TYPE, …)."],
                 ["Subframe", "Show samples of one subframe only."],
                 ["Select a row", "The trace pane below shows the full decode trace: segments, bits, assembled raw value, sign handling, conversion, and the reason for a non-VALID status."],
+                ["Show in Frame View / double-click a row", "Switches to the Frame View with the sample's words in the <a href=\"#parameter-bits\">Parameter Bits</a> panel: one row per word (segment) with its twelve bits and the segment's bits highlighted, the words outlined in the frame table, the first one selected."],
+                ["Column widths", "Fixed until you drag a header edge; Description takes the remaining width. They do not change when values change."],
             ],
         )
         + """
 <p>During a live stream the rows update as each subframe arrives: a value is published as
 soon as its subframe is in, never before. During a replay the same happens with the
-recorded subframes.</p>
+recorded subframes. The values change in place: the selected row, its trace and the
+scroll position stay where they are, so a parameter can be watched with the arrow keys
+while the stream runs. When the set of rows itself changes (another dataframe, a
+parameter added or removed) the same sample is selected again.</p>
 """,
     ),
     HelpSection(
@@ -530,8 +568,8 @@ Errors are red, warnings orange.</p>
             ["Button", "What it does"],
             [
                 ["Edit…", "Opens the parameter editor on the row; the corrected definition replaces the extraction."],
-                ["Approve Selected", "Approves the selected rows (multi-select works; filter, then select the visible rows). Rows with validation errors cannot be approved until edited."],
-                ["Exclude", "Leaves the row out of the published dataframe (toggle)."],
+                ["Approve Selected", "Approves the selected rows (multi-select works: filter, then Ctrl+A or Shift+click). Only rows the filter shows are affected, never hidden ones; the button says how many. Rows with validation errors cannot be approved until edited."],
+                ["Exclude", "Leaves the selected rows out of the published dataframe (toggle; again only the visible rows, the button says how many)."],
                 ["Show Source…", "Renders the page region the row came from, with the row outlined; row-with-context or whole page, fit to width or zoom."],
                 ["Approve All Validated", "Approves every row that normalised and validated without any issue."],
                 ["Publish", "Loads the approved rows as the working dataframe (marked unexported until Export ADB). Refused while any row blocks publishing; the reason is shown."],

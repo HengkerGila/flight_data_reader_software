@@ -18,11 +18,20 @@ from arinc717_reader.dataframe.pdf_importer.extract import (
 )
 from arinc717_reader.dataframe.pdf_importer.ingest import ingest_pdf
 from arinc717_reader.dataframe.pdf_importer.normalize import BITS_RANGE_PER_WORD
+from arinc717_reader.dataframe.pdf_importer.raw import (
+    DEFAULT_OCR_RECOGNIZER,
+    OCR_RECOGNIZER_CH,
+    OCR_RECOGNIZER_EN,
+)
 from arinc717_reader.dataframe.pdf_importer.scan import (
+    BUNDLED_RECOGNIZERS,
+    MODELS_DIR,
+    OcrUnavailable,
     RapidOcrEngine,
     detect_grid,
     estimate_skew,
     render_deskewed,
+    resolve_recognizer,
 )
 from arinc717_reader.dataframe.pdf_importer.synth import (
     FDS_COLUMNS,
@@ -126,6 +135,72 @@ def test_scanned_page_without_grid_is_reported(tmp_path):
     assert "PDF_NO_GRID" in {issue.code for issue in session.issues}
 
 
+def test_recognizer_resolution():
+    """The English model is bundled and the default; unknown names are refused."""
+    assert DEFAULT_OCR_RECOGNIZER == OCR_RECOGNIZER_EN
+    profile = ImportProfile()
+    assert profile.ocr_recognizer == OCR_RECOGNIZER_EN and profile.ocr_angle_classifier is False
+    label, model, keys = resolve_recognizer(OCR_RECOGNIZER_CH)
+    assert (label, model, keys) == (OCR_RECOGNIZER_CH, None, None)
+    label, model, keys = resolve_recognizer(OCR_RECOGNIZER_EN)
+    assert label == OCR_RECOGNIZER_EN and model == MODELS_DIR / BUNDLED_RECOGNIZERS[OCR_RECOGNIZER_EN][0]
+    assert model.is_file() and keys is None  # the character list is embedded in the model
+    assert resolve_recognizer(None)[0] == DEFAULT_OCR_RECOGNIZER
+    label, model, _keys = resolve_recognizer(str(model))  # a model path is accepted too
+    assert label == model.stem
+    with pytest.raises(OcrUnavailable):
+        resolve_recognizer("klingon")
+    with pytest.raises(OcrUnavailable):
+        resolve_recognizer("/nonexistent/model.onnx")
+
+
+def test_cell_crop_helpers():
+    from arinc717_reader.dataframe.pdf_importer.scan import (
+        MIN_CELL_INK_PIXELS,
+        cell_inset,
+        has_ink,
+        strip_rule_residue,
+    )
+
+    assert cell_inset(150) == 3 and cell_inset(200) == 3 and cell_inset(300) == 5
+    white = np.full((30, 60, 3), 255, dtype=np.uint8)
+    assert not has_ink(white)
+    speck = white.copy()
+    speck[10:12, 20:23] = 0  # 6 dark pixels: dust, not a glyph
+    assert not has_ink(speck)
+    glyph = white.copy()
+    glyph[8:22, 30:32] = 0  # a thin "1": 28 dark pixels
+    assert has_ink(glyph) and MIN_CELL_INK_PIXELS <= 28
+    framed = glyph.copy()
+    framed[:2, :] = 0     # rule residue along the top edge
+    framed[:, -3:] = 0    # and down the right edge
+    trimmed = strip_rule_residue(framed)
+    assert trimmed.shape == (28, 57, 3)
+    assert has_ink(trimmed) and not (trimmed.min(axis=2) < 200)[0].all()
+
+
+def _render_line(text: str, dpi: int = 200) -> "np.ndarray":
+    document = pymupdf.open()
+    page = document.new_page(width=120, height=26)
+    page.insert_text((6, 18), text, fontsize=9, fontname="helv")
+    pixmap = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB)
+    return np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width, 3).copy()
+
+
+@pytest.mark.skipif(not RapidOcrEngine.available(), reason="rapidocr-onnxruntime not installed")
+def test_english_recognizer_reads_numeric_cells():
+    engine = RapidOcrEngine()  # the default: English recognizer, angle classifier off
+    assert engine.name == "rapidocr:en"
+    for text in ("0", "-40", "1464", "0.0195", "14-15"):
+        recognized = engine.recognize_cell(_render_line(text))
+        assert recognized is not None, text
+        read, confidence = recognized
+        assert read == text and confidence > 0.5, (text, read, confidence)
+        assert "。" not in read
+    with_cls = RapidOcrEngine(OCR_RECOGNIZER_CH, angle_classifier=True)
+    assert with_cls.name == "rapidocr:ch+cls"
+
+
 @pytest.mark.skipif(not RapidOcrEngine.available(), reason="rapidocr-onnxruntime not installed")
 def test_scanned_image_only_page_is_read_by_ocr(tmp_path, demo_dataframe):
     path = write_dataframe_pdf(
@@ -141,3 +216,8 @@ def test_scanned_image_only_page_is_read_by_ocr(tmp_path, demo_dataframe):
     pitch = next(c for c in candidates if c.mnemonic.replace(" ", "").startswith("PITCHATT"))
     assert [o.segments[0].word for o in pitch.occurrences] == [4, 132]
     assert pitch.provenance.extra["confidence"] is not None
+    engine_note = next(issue for issue in session.issues if issue.code == "PDF_OCR_ENGINE")
+    assert "rapidocr:en" in engine_note.message and "200 dpi" in engine_note.message
+    assert "per grid cell" in engine_note.message
+    # Per-cell recognition reads every cell, so no second-pass notes exist.
+    assert not any(p.note for item in session.items for p in item.raw.provenance.values())

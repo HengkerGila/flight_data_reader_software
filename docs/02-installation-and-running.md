@@ -59,9 +59,9 @@ mismatches are warnings.
 
 ### Trying the live stream without hardware
 
-![Hardware page connected to the virtual device](../img/mockups_with_data/hardware_data.png)
+![Hardware page connected to the virtual device](../img/mockups/hardware.png)
 
-*The Hardware page connected to the in-process virtual device: the event log shows the handshake replies, the table lists the simulated signals.*
+*The Hardware page connected to the in-process virtual device and streaming: the event log shows the handshake replies, the table lists the simulated signals, the diagnostics count what arrived.*
 
 
 1. Load a dataframe (the demo is fine).

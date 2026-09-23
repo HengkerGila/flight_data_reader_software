@@ -9,9 +9,9 @@ STM32 hardware-in-the-loop simulator (or an in-process virtual device),
 decodes it subframe by subframe, graphs parameters, and records and replays
 sessions.
 
-![Main window](../img/mockups_with_data/frame_view_data.png)
+![Main window](../img/mockups/frame_view.png)
 
-*The application with the FDS81 dataframe (imported from a PDF) and a paused virtual stream.*
+*The application with the FDS81 dataframe (imported from a PDF) during a live stream from the virtual device: Frame View, Parameter Bits panel and Word Inspector.*
 
 
 The implementation specification the software follows is

@@ -137,9 +137,9 @@ its last known words, so it can be inspected and edited like any other.
 
 ## Live decoding and samples
 
-![Live samples on the Parameters page](../img/mockups_with_data/parameters_data.png)
+![Live samples on the Parameters page](../img/mockups/parameters.png)
 
-*Samples of a paused stream on the Parameters page: four rows per parameter mapped to all four subframes.*
+*Live samples on the Parameters page: four rows per parameter mapped to all four subframes, refreshed in place as each subframe arrives.*
 
 
 `StreamingService.on_arrival` decodes each RECEIVED or LATE subframe as soon
@@ -198,7 +198,7 @@ draws whatever it is handed and keeps nothing.
 
 ## The Graphs page
 
-![Graphs page](../img/mockups_with_data/graphs_data.png)
+![Graphs page](../img/mockups/graphs.png)
 
 *The Graphs page reading a 30-second window from the TimeSeriesStore.*
 

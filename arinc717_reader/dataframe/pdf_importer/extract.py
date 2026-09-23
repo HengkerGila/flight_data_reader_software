@@ -177,11 +177,24 @@ def clean_cell_text(text) -> str:
 class _OcrHolder:
     """Creates the OCR engine on first use; remembers when it is unavailable."""
 
-    def __init__(self, mode: str):
+    def __init__(
+        self,
+        mode: str,
+        recognizer: str | None = None,
+        keys_path: str | None = None,
+        angle_classifier: bool = False,
+    ):
         self.mode = mode
+        self.recognizer = recognizer
+        self.keys_path = keys_path
+        self.angle_classifier = angle_classifier
         self._engine = None
         self.error: str | None = None
         self.used = False
+
+    @property
+    def name(self) -> str | None:
+        return self._engine.name if self._engine is not None else None
 
     def get(self):
         if self.mode == "never":
@@ -191,7 +204,9 @@ class _OcrHolder:
             from .scan import OcrUnavailable, RapidOcrEngine
 
             try:
-                self._engine = RapidOcrEngine()
+                self._engine = RapidOcrEngine(
+                    self.recognizer, self.keys_path, angle_classifier=self.angle_classifier
+                )
             except OcrUnavailable as exc:
                 self.error = str(exc)
         if self._engine is not None:
@@ -207,13 +222,25 @@ def extract_tables(
     dpi: int = 150,
     page_range: tuple[int, int] | None = None,
     progress: ProgressCallback | None = None,
+    ocr_recognizer: str | None = None,
+    ocr_keys_path: str | None = None,
+    ocr_angle_classifier: bool = False,
+    ocr_cells: bool = True,
 ) -> tuple[list[RawTable], list[ImportIssue]]:
-    """Detect parameter tables on every page (native or scanned)."""
+    """Detect parameter tables on every page (native or scanned).
+
+    ``ocr_recognizer`` selects the OCR recognizer model (see
+    ``scan.resolve_recognizer``); ``ocr_keys_path`` its character list when
+    the model does not embed one; ``ocr_angle_classifier`` enables
+    RapidOCR's 180° line classifier (off for deskewed tables);
+    ``ocr_cells`` recognizes every grid cell on its own crop instead of
+    detecting text lines on the whole page.
+    """
     pymupdf = load_pymupdf()
     tables: list[RawTable] = []
     issues: list[ImportIssue] = []
     previous: RawTable | None = None
-    engine = _OcrHolder(ocr)
+    engine = _OcrHolder(ocr, ocr_recognizer, ocr_keys_path, ocr_angle_classifier)
     with pymupdf.open(str(document.path)) as pdf:
         for page_model in document.pages:
             if page_range and not (page_range[0] <= page_model.number <= page_range[1]):
@@ -228,7 +255,8 @@ def extract_tables(
             page = pdf[page_model.number - 1]
             if page_model.is_scanned:
                 found = _scanned_page_tables(
-                    page, page_model, len(tables) + 1, previous, overrides, engine, dpi, issues
+                    page, page_model, len(tables) + 1, previous, overrides, engine, dpi, issues,
+                    cells=ocr_cells,
                 )
             elif page_model.has_text_layer:
                 found = _native_page_tables(
@@ -247,6 +275,13 @@ def extract_tables(
             for table in found:
                 tables.append(table)
                 previous = table
+    if engine.used:
+        how = "per grid cell" if ocr_cells else "page text detection"
+        issues.append(
+            ImportIssue(
+                "info", "PDF_OCR_ENGINE", f"text recognized with {engine.name} at {dpi} dpi, {how}"
+            )
+        )
     return tables, issues
 
 
@@ -300,11 +335,14 @@ def _native_page_tables(page, page_model, next_index, previous, overrides, issue
     return found
 
 
-def _scanned_page_tables(page, page_model, index, previous, overrides, engine, dpi, issues):
+def _scanned_page_tables(
+    page, page_model, index, previous, overrides, engine, dpi, issues, cells: bool = True
+):
     from .scan import (
         detect_grid,
         grid_cells,
         ocr_boxes,
+        recognize_cells,
         render_deskewed,
         second_pass_cells,
         text_layer_boxes,
@@ -324,7 +362,7 @@ def _scanned_page_tables(page, page_model, index, previous, overrides, engine, d
         )
         return []
     if page_model.has_text_layer:
-        boxes = text_layer_boxes(page)
+        cell_rows = grid_cells(raster, grid, text_layer_boxes(page))
         source = SOURCE_TEXT_LAYER
     else:
         ocr_engine = engine.get()
@@ -340,9 +378,12 @@ def _scanned_page_tables(page, page_model, index, previous, overrides, engine, d
             )
             return []
         rgb = raster.rgb()
-        boxes = ocr_boxes(raster, ocr_engine, rgb)
         source = SOURCE_OCR
-    cell_rows = grid_cells(raster, grid, boxes)
+        if cells:
+            cell_rows = recognize_cells(raster, grid, ocr_engine, rgb)
+            rgb = None  # every cell was read already; no second pass
+        else:
+            cell_rows = grid_cells(raster, grid, ocr_boxes(raster, ocr_engine, rgb))
     strategy = f"scan+{source}" + (
         f" (deskewed {raster.skew_degrees:.2f}°)" if raster.skew_degrees else ""
     )
@@ -361,19 +402,17 @@ def _scanned_page_tables(page, page_model, index, previous, overrides, engine, d
     if raw_table is None:
         return []
     if rgb is not None:
-        # Cells in mapping-critical columns that the detector left empty get
-        # a recognition-only pass on their crop (isolated digits are often
+        # Page text detection: mapped cells the detector left empty get a
+        # recognition-only pass on their crop (isolated digits are often
         # missed by text detectors).
-        critical_columns = {
-            raw_table.mapping[fld] for fld in CRITICAL_FIELDS if fld in raw_table.mapping
-        }
+        mapped_columns = set(raw_table.mapping.values())
         targets = [
             cell
             for row in raw_table.rows
             for column, cell in enumerate(row)
-            if column in critical_columns and not cell.text
+            if column in mapped_columns and not cell.text
         ]
-        second_pass_cells(rgb, grid, targets, engine.get())
+        second_pass_cells(rgb, grid, targets, engine.get(), dpi=dpi)
     return [raw_table]
 
 

@@ -15,6 +15,17 @@ SOURCE_NATIVE = "native"          # born-digital text
 SOURCE_TEXT_LAYER = "text_layer"  # OCR text embedded by the scanner / Acrobat
 SOURCE_OCR = "ocr"                # recognized by this application's OCR engine
 
+# OCR recognizer models (the network that reads characters from a text
+# crop).  ``ch`` is the Chinese-plus-Latin recognizer RapidOCR ships with;
+# ``en`` is the English-only PP-OCR recognizer bundled with this package
+# (``pdf_importer/models/``), the default since it reads these documents'
+# digits and punctuation more reliably (``tools/ocr_bench.py``).  A profile
+# may also name a model file path.
+OCR_RECOGNIZER_CH = "ch"
+OCR_RECOGNIZER_EN = "en"
+OCR_RECOGNIZERS = (OCR_RECOGNIZER_CH, OCR_RECOGNIZER_EN)
+DEFAULT_OCR_RECOGNIZER = OCR_RECOGNIZER_EN
+
 # Mappable raw fields, in the order they are shown to reviewers.
 RAW_FIELDS = (
     "parameter_name",

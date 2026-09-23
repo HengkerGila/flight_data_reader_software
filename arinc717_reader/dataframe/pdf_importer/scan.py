@@ -18,12 +18,21 @@ from __future__ import annotations
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
 from .ingest import load_pymupdf
-from .raw import SOURCE_OCR, SOURCE_TEXT_LAYER, BBox, RawCell
+from .raw import (
+    DEFAULT_OCR_RECOGNIZER,
+    OCR_RECOGNIZER_CH,
+    OCR_RECOGNIZER_EN,
+    SOURCE_OCR,
+    SOURCE_TEXT_LAYER,
+    BBox,
+    RawCell,
+)
 
 DARK_THRESHOLD = 200        # gray level below which a pixel is ink
 OPENING_DIVISOR = 40        # opening window = max(30, dimension // 40) pixels
@@ -252,12 +261,64 @@ def text_layer_boxes(page) -> list[TextBox]:
     return boxes
 
 
+# Recognizer models bundled with this package: name → (model file, character
+# list file or None when the model embeds its characters).
+MODELS_DIR = Path(__file__).with_name("models")
+BUNDLED_RECOGNIZERS: dict[str, tuple[str, str | None]] = {
+    # PP-OCRv3 English recognizer (Apache 2.0, see models/README.md); the
+    # character list is embedded in the model.
+    OCR_RECOGNIZER_EN: ("en_PP-OCRv3_rec_infer.onnx", None),
+}
+
+
+def resolve_recognizer(
+    recognizer: str | None, keys_path: str | Path | None = None
+) -> tuple[str, Path | None, Path | None]:
+    """(label, model path or None for RapidOCR's own model, character list path).
+
+    ``recognizer`` is a name (``ch``, ``en``) or the path of a recognizer
+    ONNX file.  Raises ``OcrUnavailable`` for an unknown name or a missing
+    file — never falls back silently to another model.
+    """
+    name = (recognizer or DEFAULT_OCR_RECOGNIZER).strip()
+    keys = Path(keys_path) if keys_path else None
+    if name == OCR_RECOGNIZER_CH:
+        return name, None, keys
+    if name in BUNDLED_RECOGNIZERS:
+        model_name, keys_name = BUNDLED_RECOGNIZERS[name]
+        model = MODELS_DIR / model_name
+        if not model.is_file():
+            raise OcrUnavailable(f"the {name!r} OCR recognizer model is not installed ({model})")
+        if keys is None and keys_name:
+            bundled_keys = MODELS_DIR / keys_name
+            keys = bundled_keys if bundled_keys.is_file() else None
+        return name, model, keys
+    model = Path(name)
+    if not model.is_file():
+        raise OcrUnavailable(
+            f"unknown OCR recognizer {recognizer!r}: not one of "
+            f"{(OCR_RECOGNIZER_CH, *BUNDLED_RECOGNIZERS)} and not a model file"
+        )
+    return model.stem, model, keys
+
+
 class RapidOcrEngine:
-    """RapidOCR (ONNX runtime) wrapper; models ship with the package."""
+    """RapidOCR (ONNX runtime) wrapper.
 
-    name = "rapidocr"
+    The detector is RapidOCR's own; the recognizer is selectable
+    (``recognizer``: ``ch``, ``en`` or a model path) because the character
+    set it was trained on decides how digits and punctuation are read.  The
+    180° angle classifier is off by default: the page is already deskewed
+    and a table has no upside-down lines, while the classifier flips short
+    crops ("ON" → "NO", "90" → "06", "9" → "6").
+    """
 
-    def __init__(self):
+    def __init__(
+        self,
+        recognizer: str | None = None,
+        keys_path: str | Path | None = None,
+        angle_classifier: bool = False,
+    ):
         try:
             from rapidocr_onnxruntime import RapidOCR
         except ImportError as exc:
@@ -265,7 +326,16 @@ class RapidOcrEngine:
                 "OCR needs the 'rapidocr-onnxruntime' package "
                 "(pip install rapidocr-onnxruntime)."
             ) from exc
-        self._engine = RapidOCR()
+        label, model, keys = resolve_recognizer(recognizer, keys_path)
+        kwargs: dict[str, str] = {}
+        if model is not None:
+            kwargs["rec_model_path"] = str(model)
+        if keys is not None:
+            kwargs["rec_keys_path"] = str(keys)
+        self._engine = RapidOCR(**kwargs)
+        self._angle_classifier = bool(angle_classifier)
+        self.recognizer = label
+        self.name = f"rapidocr:{label}" + ("+cls" if self._angle_classifier else "")
 
     @staticmethod
     def available() -> bool:
@@ -300,7 +370,7 @@ class RapidOcrEngine:
 
     def recognize(self, rgb: np.ndarray) -> list[TextBox]:
         """Text lines with confidences, in pixel coordinates of ``rgb``."""
-        result, _elapsed = self._engine(rgb)
+        result, _elapsed = self._engine(rgb, use_cls=self._angle_classifier)
         boxes: list[TextBox] = []
         for quad, text, score in result or []:
             xs = [point[0] for point in quad]
@@ -324,9 +394,21 @@ def ocr_boxes(raster: PageRaster, engine, rgb: np.ndarray | None = None) -> list
     return boxes
 
 
+LINE_PAD = 4  # white margin added around a cropped text line before recognition
+
+
+def _ink_mask(rgb_crop: np.ndarray) -> np.ndarray:
+    return rgb_crop.min(axis=2) < DARK_THRESHOLD
+
+
 def _ink_line_bands(rgb_crop: np.ndarray, margin: int = 2, min_height: int = 5) -> list[np.ndarray]:
-    """Split a cell image into its text lines (horizontal ink projection)."""
-    ink = rgb_crop.min(axis=2) < DARK_THRESHOLD
+    """Split a cell image into its text lines (horizontal ink projection).
+
+    Each line is also cropped horizontally to its ink and given a small white
+    margin, so a short string in a wide cell is presented to the recognizer
+    the way a detected text box would be.
+    """
+    ink = _ink_mask(rgb_crop)
     profile = ink.sum(axis=1)
     bands: list[np.ndarray] = []
     for y0, y1 in _bands(profile, 0, gap=2):
@@ -334,34 +416,107 @@ def _ink_line_bands(rgb_crop: np.ndarray, margin: int = 2, min_height: int = 5) 
             continue
         top = max(0, y0 - margin)
         bottom = min(rgb_crop.shape[0], y1 + 1 + margin)
-        bands.append(rgb_crop[top:bottom])
+        columns = np.nonzero(ink[y0 : y1 + 1].any(axis=0))[0]
+        left = max(0, int(columns[0]) - margin)
+        right = min(rgb_crop.shape[1], int(columns[-1]) + 1 + margin)
+        band = rgb_crop[top:bottom, left:right]
+        bands.append(np.pad(band, ((LINE_PAD, LINE_PAD), (LINE_PAD, LINE_PAD), (0, 0)), constant_values=255))
     return bands or [rgb_crop]
 
 
-CELL_INSET = 3          # pixels kept clear of the ruling lines
-MIN_CELL_INK = 0.004    # fraction of dark pixels below which a cell is blank
+CELL_INSET = 3            # pixels kept clear of the ruling lines at 150 dpi
+MIN_CELL_INK_PIXELS = 12  # fewer dark pixels than this and a cell is blank
+RULE_RESIDUE = 0.5        # a border row / column darker than this is ruling-line residue
 SECOND_PASS_NOTE = "second-pass OCR on the cell crop (detector found no text)"
 
 
+def cell_inset(dpi: int) -> int:
+    """Clearance from the ruling lines, scaled with the render resolution."""
+    return max(CELL_INSET, round(dpi / 60))
+
+
+def strip_rule_residue(crop: np.ndarray, threshold: float = RULE_RESIDUE) -> np.ndarray:
+    """Trim border rows and columns that are mostly ink: bits of the ruling
+    lines left inside the cell crop, which would otherwise read as a line."""
+    ink = _ink_mask(crop)
+    top, bottom, left, right = 0, ink.shape[0], 0, ink.shape[1]
+    while top < bottom and ink[top, left:right].mean() > threshold:
+        top += 1
+    while bottom > top and ink[bottom - 1, left:right].mean() > threshold:
+        bottom -= 1
+    while left < right and ink[top:bottom, left].mean() > threshold:
+        left += 1
+    while right > left and ink[top:bottom, right - 1].mean() > threshold:
+        right -= 1
+    return crop[top:bottom, left:right]
+
+
+def has_ink(crop: np.ndarray) -> bool:
+    """Whether a cell crop holds a glyph (an absolute count, so a lone "1"
+    counts at any resolution while a speck of dust does not)."""
+    return crop.size > 0 and int(_ink_mask(crop).sum()) >= MIN_CELL_INK_PIXELS
+
+
+def _cell_crop(rgb: np.ndarray, grid: Grid, row: int, col: int, inset: int) -> np.ndarray | None:
+    height, width = rgb.shape[:2]
+    x0, y0, x1, y1 = grid.cell(row, col)
+    x0, y0 = int(x0) + inset, int(y0) + inset
+    x1, y1 = min(int(x1) - inset, width), min(int(y1) - inset, height)
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return None
+    crop = strip_rule_residue(rgb[y0:y1, x0:x1])
+    return crop if crop.size else None
+
+
+def recognize_cells(raster: PageRaster, grid: Grid, engine, rgb: np.ndarray) -> list[list[RawCell]]:
+    """OCR every grid cell on its own crop, without page-level text detection.
+
+    The page detector works on a downscaled page and misses short strings (a
+    lone "0", a "-40"), splits or duplicates boxes at high resolution, and
+    its boxes can straddle cells.  Here each cell crop (inside the ruling
+    lines, trimmed of line residue) is split into text lines by ink
+    projection and recognized line by line, so every cell with ink is read
+    and text can never land in a neighbouring cell.  Returns one RawCell row
+    per grid row, like :func:`grid_cells`.
+    """
+    inset = cell_inset(raster.dpi)
+    rows: list[list[RawCell]] = []
+    for row in range(grid.row_count):
+        cells: list[RawCell] = []
+        for col in range(grid.col_count):
+            text, confidence = "", None
+            crop = _cell_crop(rgb, grid, row, col, inset)
+            if crop is not None and has_ink(crop):
+                recognized = engine.recognize_cell(crop)
+                if recognized is not None:
+                    text, confidence = recognized
+            cells.append(
+                RawCell(
+                    text=text,
+                    bbox=raster.to_page(grid.cell(row, col)),
+                    confidence=confidence,
+                    source=SOURCE_OCR,
+                    grid_cell=(row, col),
+                )
+            )
+        rows.append(cells)
+    return rows
+
+
 def second_pass_cells(
-    rgb: np.ndarray, grid: Grid, cells: list[RawCell], engine
+    rgb: np.ndarray, grid: Grid, cells: list[RawCell], engine, dpi: int = DEFAULT_DPI
 ) -> int:
     """Recognize text in cells the detector left empty; returns how many were filled.
 
     Only cells with visible ink are tried, so blank cells stay blank.
     """
     filled = 0
-    height, width = rgb.shape[:2]
+    inset = cell_inset(dpi)
     for cell in cells:
         if cell.text or cell.grid_cell is None:
             continue
-        x0, y0, x1, y1 = grid.cell(*cell.grid_cell)
-        x0, y0 = int(x0) + CELL_INSET, int(y0) + CELL_INSET
-        x1, y1 = min(int(x1) - CELL_INSET, width), min(int(y1) - CELL_INSET, height)
-        if x1 - x0 < 6 or y1 - y0 < 6:
-            continue
-        crop = rgb[y0:y1, x0:x1]
-        if float((crop.min(axis=2) < DARK_THRESHOLD).mean()) < MIN_CELL_INK:
+        crop = _cell_crop(rgb, grid, *cell.grid_cell, inset)
+        if crop is None or not has_ink(crop):
             continue
         recognized = engine.recognize_cell(crop)
         if recognized is None:

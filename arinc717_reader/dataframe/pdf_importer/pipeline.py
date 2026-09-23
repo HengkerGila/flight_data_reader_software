@@ -42,6 +42,10 @@ def import_pdf(
         dpi=profile.ocr_dpi,
         page_range=profile.page_range,
         progress=progress,
+        ocr_recognizer=profile.ocr_recognizer,
+        ocr_keys_path=profile.ocr_keys_path,
+        ocr_angle_classifier=profile.ocr_angle_classifier,
+        ocr_cells=profile.ocr_cells,
     )
     rows = rows_from_tables(tables)
     if not rows and not any(issue.code == "PDF_EXTRACTION_REVIEW_REQUIRED" for issue in issues):

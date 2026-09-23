@@ -131,6 +131,8 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
 
+        self.parameters_page.show_in_frame_view.connect(self.show_sample_in_frame_view)
+
         ctx.dataframe_store.subscribe(lambda event: self._refresh())
         ctx.frame_store.subscribe(lambda event: self._refresh())
         ctx.engineering_store.subscribe(lambda event: self._refresh())
@@ -345,6 +347,13 @@ class MainWindow(QMainWindow):
                 save_theme_preference(theme)
             except Exception as exc:  # settings store unavailable: keep running
                 self.statusBar().showMessage(f"Theme not saved: {exc}", 8000)
+
+    # -- cross-page navigation ------------------------------------------------
+
+    def show_sample_in_frame_view(self, key) -> None:
+        """Show a decoded sample's words in the Frame View (from the Parameters page)."""
+        self.frame_view_page.show_sample(key)
+        self.tabs.setCurrentWidget(self.frame_view_page)
 
     # -- help ---------------------------------------------------------------
 

@@ -35,8 +35,11 @@ for package in ("rapidocr_onnxruntime", "pymupdf"):
     hiddenimports += h
 
 # The importer loads the OCR engine lazily (inside a function), which static
-# analysis can miss; name the modules explicitly.
+# analysis can miss; name the modules explicitly.  The package's own data
+# (the bundled English OCR recognizer under pdf_importer/models) must be
+# collected too: it is opened by path at run time.
 hiddenimports += collect_submodules("arinc717_reader")
+datas += collect_data_files("arinc717_reader")
 hiddenimports += ["rapidocr_onnxruntime", "onnxruntime", "cv2", "shapely", "pyclipper", "yaml"]
 # pyserial: the port enumeration is imported inside a function and the
 # platform back end is chosen at run time.
@@ -50,7 +53,7 @@ for example in ("demo_256wps.adb", "demo_256wps.pdf"):
 
 # Screenshots shown in the Help tab (arinc717_reader/ui/help/help_content.py
 # looks for them under <bundle>/img when frozen).
-for folder in ("mockups_no_data", "mockups_with_data"):
+for folder in ("mockups",):
     source_dir = ROOT / "img" / folder
     if source_dir.is_dir():
         for image in sorted(source_dir.glob("*.png")):

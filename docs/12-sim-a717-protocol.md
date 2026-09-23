@@ -153,9 +153,9 @@ that many times at the point where it applies.
 
 ## What the PC sends and when
 
-![Handshake replies in the Stream events log](../img/mockups_with_data/hardware_data.png)
+![Handshake replies in the Stream events log](../img/mockups/hardware.png)
 
-*The Stream events log after Connect and Start: the `+OK` replies to SET_PROTOCOL, SET_MODE, LOAD_SF 1–4, COMMIT and INFO, then STREAM_STARTED and STREAM_SYNC_LOCKED.*
+*The Stream events log on the Hardware page: the `+OK` replies to INFO and to LOAD_SF 1–4 and COMMIT, then STREAM_STARTED and STREAM_SYNC_LOCKED; a stop and a restart repeat the upload.*
 
 
 The serial service (`services/serial_service.py`) runs this dialogue.

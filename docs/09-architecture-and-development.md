@@ -204,4 +204,4 @@ normalised text a document uses rather than loosening the fuzzy threshold.
 | Repository in the GUI | Save/load of dataframe documents is API-only. |
 | ADB parameter record layout | Provisional until a real Aering/AFDA file is verified. |
 | PDF importer | Column conventions verified against one real document; other vendors will need synonyms and possibly conventions. |
-| OCR | CPU-only RapidOCR; a page takes about 20 s. |
+| OCR | CPU-only RapidOCR with the bundled English recognizer and per-cell recognition; a page takes about 10 s at 200 dpi. `tools/ocr_bench.py` measures any change against known ground truth. No result cache between imports yet. |

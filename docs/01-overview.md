@@ -85,7 +85,7 @@ frame or the dataframe. See [13 — Live streaming, graphs and recording](13-liv
 
 ## The workflow at a glance
 
-![Parameters page](../img/mockups_with_data/parameters_data.png)
+![Parameters page](../img/mockups/parameters.png)
 
 *Frame words on the left of the pipeline become decoded samples like these: the Parameters page with the decode trace of the selected row.*
 

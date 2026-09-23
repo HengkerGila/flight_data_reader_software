@@ -129,10 +129,13 @@ dist/ARINC717Reader/ARINC717Reader examples/demo_256wps.adb
 
 `arinc717_reader.spec` collects the RapidOCR model files (`*.onnx`,
 `config.yaml`) and the PyMuPDF binaries explicitly, because they are loaded
-at run time and static analysis does not see them; names the lazily imported
-OCR modules as hidden imports; bundles the two example files; and excludes
-the Qt modules the application never uses (WebEngine, Qml, Multimedia, …)
-to keep the folder around 350 MB instead of 700 MB.
+at run time and static analysis does not see them; collects the package's
+own data files, in particular the English OCR recognizer
+(`arinc717_reader/dataframe/pdf_importer/models/en_PP-OCRv3_rec_infer.onnx`,
+9 MB, the importer's default recognizer); names the lazily imported OCR
+modules as hidden imports; bundles the two example files; and excludes the
+Qt modules the application never uses (WebEngine, Qml, Multimedia, …) to
+keep the folder around 350 MB instead of 700 MB.
 
 ## Common problems
 

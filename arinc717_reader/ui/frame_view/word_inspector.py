@@ -43,7 +43,9 @@ class WordInspectorWidget(QWidget):
     def _render(self) -> None:
         frame = self._ctx.frame_store.frame
         if self._current is None:
-            self._text.setPlainText("Click a Frame View cell to inspect it.")
+            self._text.setPlainText(
+                "Click a Frame View cell, or move to one with the arrow keys, to inspect it."
+            )
             return
         if frame is None:
             self._text.setPlainText("No frame loaded.")

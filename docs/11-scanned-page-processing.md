@@ -219,16 +219,48 @@ is better than what a 150 dpi re-render would give.
 ### RapidOCR
 
 Without a text layer the page goes to `RapidOcrEngine`, a thin wrapper
-around `rapidocr_onnxruntime.RapidOCR` (ONNX models bundled with the
-package, CPU only, no network). It is an optional dependency:
-`pip install rapidocr-onnxruntime` or `.[ocr]`.
+around `rapidocr_onnxruntime.RapidOCR` (ONNX models, CPU only, no network).
+It is an optional dependency: `pip install rapidocr-onnxruntime` or
+`.[ocr]`.
 
-`recognize(rgb)` runs the engine's full pipeline on the RGB render:
-text-region detection, angle classification and recognition. Each result is
-a quadrilateral, a string and a score; the quadrilateral is reduced to its
-axis-aligned bounding box in raster pixels, then `ocr_boxes()` maps every box
-back to displayed-page points with `to_page`. The boxes carry the score as
-confidence and the source `ocr`.
+RapidOCR is three networks: a text *detector* (where are the lines), an
+*angle classifier* (is a line upside down) and a *recognizer* (which
+characters). The importer configures them as follows; every choice was
+measured with `tools/ocr_bench.py` (section 13):
+
+- **Recognizer: English PP-OCRv3** (`ImportProfile.ocr_recognizer = "en"`,
+  the default), bundled in `pdf_importer/models/` (Apache 2.0, 9 MB, its
+  95-character list embedded in the file). RapidOCR's own recognizer is
+  trained on Chinese plus Latin: it returns a lone `0` as the CJK full stop
+  `。`, drops spaces and confuses more digits. It stays available as
+  `ocr_recognizer = "ch"`, and any recognizer ONNX file can be named by
+  path (with `ocr_keys_path` when the file does not embed its characters).
+- **Angle classifier off** (`ocr_angle_classifier = False`). The page is
+  already deskewed and a table has no upside-down lines, whereas the
+  classifier flips short crops: `ON` → `NO`, `90` → `06`, `9` → `6`.
+- **Recognition per grid cell** (`ocr_cells = True`, the default) instead
+  of page-level text detection.
+
+`recognize_cells()` reads every cell of the detected grid on its own crop:
+the cell rectangle inset from the ruling lines (`cell_inset(dpi)`: 3 px at
+150 dpi, 5 px at 300), trimmed of rule residue (`strip_rule_residue()`
+removes border rows and columns that are more than half ink), skipped when
+it holds fewer than 12 dark pixels (`has_ink()`), otherwise split into text
+lines by its ink profile (`_ink_line_bands()`, each line cropped to its ink
+and padded with 4 white pixels) and recognised line by line with
+`recognize_cell()`. The cell's text is the lines joined with newlines, its
+confidence the lowest line score, its source `ocr`. Nothing is detected on
+the page, so a lone `0` or a `-40` is read like any other cell and text can
+never land in a neighbouring cell.
+
+The older path (`ocr_cells = False`) is kept for comparison: `recognize(rgb)`
+runs the detector and the recognizer on the whole render, each result box
+is reduced to its axis-aligned bounding box, mapped back to displayed-page
+points by `ocr_boxes()` and dropped into the cell under its centre, and the
+empty mapped cells get the second pass of section 8. It is slower and less
+accurate: the detector works on a downscaled page and misses isolated
+glyphs, at high resolution it splits or duplicates boxes, and a box can
+straddle two cells.
 
 The engine is created once per import by `_OcrHolder` in `extract.py`, on
 the first page that needs it, and its failure is remembered so a missing
@@ -239,11 +271,13 @@ message. The same code is emitted when the package is not installed. Either
 way the page is reported, never silently skipped, and the session still
 imports the other pages.
 
-Recognition runs at the render resolution. 150 dpi is enough for the
-CN235 document's 7–8 pt print; raising `ocr_dpi` to 200 improves small
-print at the cost of roughly proportional time. A page takes about 20 s on a
-CPU at 150 dpi; the 8 image-only pages of the real document take
-2–3 minutes.
+Recognition runs at the render resolution, `ocr_dpi`, 200 by default: on
+the benchmark 150 dpi loses about two points of cell accuracy and 300 dpi
+gains nothing worth its extra time. A page takes about 7–9 s on a CPU at
+200 dpi with per-cell recognition (page detection took 12–15 s, most of it
+in the full-page detector and the second passes). The recognizer, the
+resolution and the mode used are recorded as the info issue
+`PDF_OCR_ENGINE` in the review dialog's Document box.
 
 ## 6. Dropping text boxes into cells
 
@@ -308,29 +342,34 @@ tail of the previous row split by a page break, and is appended to it with a
 note. This is how a state list that runs from page 12 to page 14 of the CN235
 document ends up on one parameter.
 
-## 8. Second-pass recognition on empty cells
+## 8. Second-pass recognition on empty cells (page-detection mode)
+
+With per-cell recognition (the default, section 5) every cell with ink is
+read directly and no second pass is needed. This section describes the
+fallback that the page-detection mode (`ocr_cells = False`) relies on.
 
 Text detectors are trained on lines of text and routinely miss isolated
 small glyphs: a lone "0" or "1" in a Subframe or LSB column, a "3" in a
-narrow cell. On the OCR path such cells come out empty, and an empty
-subframe or bit cell would send every affected row to review or make it
-unrepresentable.
+narrow cell. Such cells come out empty, and an empty subframe or bit cell
+would send every affected row to review or make it unrepresentable.
 
 After the table is built, `_scanned_page_tables()` collects every empty cell
-in a mapping-critical column (`CRITICAL_FIELDS`: name, type, sign,
-frequency, word, subframe, MSB, LSB, bits, resolution, offset) and hands
-them to `second_pass_cells()`, which recognises them without detection:
+in a mapped column and hands them to `second_pass_cells()`, which recognises
+them without detection, using the same crop preparation as per-cell
+recognition:
 
-1. The cell rectangle is cropped from the RGB render, inset by 3 pixels
-   (`CELL_INSET`) so the ruling lines are not read as strokes. Crops
+1. The cell rectangle is cropped from the RGB render, inset from the ruling
+   lines by `cell_inset(dpi)` pixels and trimmed of rule residue. Crops
    smaller than 6 pixels in either direction are skipped.
-2. Cells whose dark-pixel fraction is below 0.4 % (`MIN_CELL_INK`) are
+2. Cells with fewer than 12 dark pixels (`MIN_CELL_INK_PIXELS`) are
    considered blank and left empty, so a genuinely empty cell never gains
-   text.
+   text. The count is absolute so that a thin "1" still counts at 300 dpi,
+   where a fraction of the (larger) cell would not.
 3. `_ink_line_bands()` splits the crop into its text lines with a
    horizontal ink projection (rows with ink, gaps of up to 2 pixels merged,
-   bands shorter than 5 pixels ignored, 2 pixels of margin added), so a cell
-   with two lines is recognised line by line.
+   bands shorter than 5 pixels ignored, 2 pixels of margin added, each line
+   cropped to its ink and padded white), so a cell with two lines is
+   recognised line by line.
 4. Each band goes to the recognizer alone (`use_det=False`,
    `use_cls=False`). The texts are joined with newlines and the cell's
    confidence is the lowest line score.
@@ -339,8 +378,7 @@ them to `second_pass_cells()`, which recognises them without detection:
    normalizer turns that note into an info issue on the row so the reviewer
    knows the value came from the fallback.
 
-The second pass only runs on the OCR path (`rgb` is only rendered there);
-text-layer pages are taken as they are.
+Text-layer pages are taken as they are in either mode.
 
 ## 9. What the raw model carries forward
 
@@ -384,6 +422,7 @@ reviewer's job, not the importer's.
 | `PDF_EXTRACTION_REVIEW_REQUIRED` | error | A scanned page has no text layer and OCR is disabled or unavailable; nothing was extracted from it. |
 | `PDF_EMPTY_PAGE` | warning | A page has neither text nor a page image. |
 | `PDF_TABLE_SKIPPED` | warning | The grid was found but its first row is not a recognisable header and no header could be inherited. |
+| `PDF_OCR_ENGINE` | info | OCR was used; the message names the recognizer, the resolution and the mode (`per grid cell` or `page text detection`). |
 
 Document-level issues are listed in the review dialog's Document box.
 `PDF_EXTRACTION_REVIEW_REQUIRED` does not block publishing the rows that
@@ -397,7 +436,10 @@ dialog's conventions box):
 | Setting | Default | Effect on the image path |
 | --- | --- | --- |
 | `ocr` | `auto` | `never` disables the engine; image-only pages are reported instead of read. |
-| `ocr_dpi` | 150 | Render resolution for skew, grid and OCR. 200 helps small print; time grows with the pixel count. |
+| `ocr_dpi` | 200 | Render resolution for skew, grid and OCR. 150 loses about two points of cell accuracy; 300 costs time for no measurable gain. |
+| `ocr_recognizer` | `en` | Recognizer model: `en` (bundled English PP-OCRv3), `ch` (RapidOCR's Chinese-plus-Latin model) or the path of a recognizer ONNX file (`ocr_keys_path` names its character list if the file lacks one). |
+| `ocr_angle_classifier` | false | RapidOCR's 180° line classifier. Leave it off for deskewed tables; it flips short crops. |
+| `ocr_cells` | true | Recognise each grid cell on its own crop. `false` selects page-level text detection with the second pass of section 8. |
 | `ocr_confidence_threshold` | 0.6 | Below this a critical field is flagged for review. Raise it for a poor scan, lower it for a clean one. |
 | `page_range` | all pages | Process only these pages; the fastest way to skip pages that need OCR. |
 
@@ -411,10 +453,42 @@ Constants in `scan.py`, changed only when a document defeats the defaults:
 | `BAND_GAP` | 4 | Thick or doubled rules are detected twice. | Two closely spaced rules merge into one. |
 | `MIN_RULE_FRACTION` / `MIN_VRULE_FRACTION` | 0.4 / 0.2 | Non-table lines are accepted as rules. | The table is narrow or short on the page. |
 | `MAX_SKEW_DEGREES` | 5 | A scan is more crooked than 5° (rare; the estimate is then trusted). | Never in practice. |
-| `CELL_INSET` | 3 | Rule pixels leak into second-pass crops. | Thin cells lose their glyphs. |
-| `MIN_CELL_INK` | 0.004 | Speckle noise triggers a second pass on blank cells. | A single thin glyph is treated as blank. |
+| `CELL_INSET` | 3 at 150 dpi (`cell_inset()` scales it with the resolution) | Rule pixels leak into cell crops. | Thin cells lose their glyphs. |
+| `RULE_RESIDUE` | 0.5 | Border rows / columns of rule residue survive into the crop. | Dense text at a cell edge is trimmed away. |
+| `MIN_CELL_INK_PIXELS` | 12 | Speckle noise is recognised as text in blank cells. | A single thin glyph is treated as blank. |
+| `LINE_PAD` | 4 | Glyphs touching the crop edge are misread. | Never in practice. |
 
 ## 13. Accuracy: what helps and what does not work
+
+### Measured
+
+`tools/ocr_bench.py` renders a 48-parameter dataframe with many numeric
+cells as image-only scans (200 dpi image, 6.5 pt print, 0.6° skew) in the
+generic and the FDS layouts, runs the scanned-page pipeline and compares
+every cell with the known truth: *exact* is the share of cells whose text is
+identical after whitespace normalisation, *CER* the character error rate.
+The settings were changed one at a time (96 rows, about 1,300 cells):
+
+| Pipeline | Generic exact | FDS exact | CER generic / FDS | s per page |
+| --- | --- | --- | --- | --- |
+| Default RapidOCR recognizer, page detection, angle classifier on, 150 dpi (before) | 87.2 % | 85.1 % | 7.8 % / 6.5 % | 15 / 11 |
+| English recognizer, otherwise the same | 94.0 % | 92.5 % | 4.6 % / 5.4 % | 12 / 10 |
+| + angle classifier off | 95.8 % | 93.8 % | 3.1 % / 4.5 % | 14 / 11 |
+| + 200 dpi | 97.3 % | 95.3 % | 1.9 % / 4.2 % | 13 / 12 |
+| + per-cell recognition (**the default now**) | 99.7 % | 99.1 % | 0.08 % / 0.12 % | 8.5 / 6.6 |
+| the same at 300 dpi | 99.6 % | 99.7 % | 0.07 % / 0.07 % | 9.1 / 8.2 |
+
+What remains at the default settings is `lb/h` read as `Ib/h`, `WOW` as
+`WoW` and one `0 (all 4)` as `0 (ll 4)`: shape ambiguities of the typeface,
+not detection failures. Synthetic renders are cleaner than a real scan, so
+treat the absolute numbers as an upper bound; the differences between the
+rows are what the benchmark is for. Run it after any change to `scan.py`:
+
+```bash
+.venv/bin/python tools/ocr_bench.py                          # defaults
+.venv/bin/python tools/ocr_bench.py --rec ch --page-detector  # the old path
+.venv/bin/python tools/ocr_bench.py --real examples/FDS81.pdf --pages 14-21
+```
 
 What helps:
 
@@ -449,8 +523,8 @@ Known limitations of the current implementation:
   portrait page with a 90° page rotation is fine; a portrait page whose
   image content is rotated 90° without a page rotation flag is not
   recognised, because the skew estimator gives up above 5°.
-- **Time.** OCR is CPU-bound at roughly 20 s per page; there is no GPU path
-  and no caching between imports.
+- **Time.** OCR is CPU-bound at roughly 7–9 s per page at 200 dpi; there is
+  no GPU path and no caching between imports.
 
 ## Verifying the pipeline
 

@@ -14,7 +14,7 @@ import copy
 
 import dataclasses
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt
 from PySide6.QtGui import QColor, QFont, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -314,6 +314,11 @@ class PdfReviewDialog(QDialog):
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         self._table.currentCellChanged.connect(lambda *_: self._selection_changed())
+        # A Shift+click range or Ctrl+A also selects rows the filter hides;
+        # keep the selection inside the visible rows so Approve / Exclude act
+        # only on what the reviewer can see.
+        self._deselecting = False
+        self._table.itemSelectionChanged.connect(self._on_selection_changed)
         self._table.itemDoubleClicked.connect(lambda *_: self._edit_selected())
         splitter.addWidget(self._table)
 
@@ -537,6 +542,7 @@ class PdfReviewDialog(QDialog):
                 ).lower()
                 visible = needle in haystack
             self._table.setRowHidden(row, not visible)
+        self._deselect_hidden()
 
     def _render_summary(self) -> None:
         session = self._session
@@ -577,19 +583,93 @@ class PdfReviewDialog(QDialog):
     # -- selection ---------------------------------------------------------------
 
     def selected_index(self) -> int | None:
+        """Import-row index of the current row, when the filter shows it."""
         row = self._table.currentRow()
-        if row < 0:
+        if row < 0 or self._table.isRowHidden(row):
             return None
         cell = self._table.item(row, 0)
         return cell.data(Qt.ItemDataRole.UserRole) if cell else None
 
+    def _reference_item(self) -> ImportItem | None:
+        """The item the buttons and the details pane refer to: the current
+        row, else the first selected visible row (after Ctrl+A there may be
+        a selection without a current row)."""
+        index = self.selected_index()
+        if index is None:
+            indexes = self.selected_indexes()
+            index = indexes[0] if indexes else None
+        return self._session.items[index] if index is not None else None
+
     def selected_indexes(self) -> list[int]:
+        """Import-row indexes of the selected rows that the filter shows.
+
+        Rows hidden by "Show" or the search box are never included, even
+        when a Shift+click range or Ctrl+A selected them: acting on rows the
+        reviewer cannot see would exclude or approve them unnoticed.
+        """
         rows = sorted({index.row() for index in self._table.selectionModel().selectedRows()})
-        indexes = [self._table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in rows]
-        current = self.selected_index()
-        if current is not None and current not in indexes:
-            indexes.append(current)
+        indexes = [
+            self._table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            for row in rows
+            if not self._table.isRowHidden(row)
+        ]
+        current_row = self._table.currentRow()
+        if current_row >= 0 and not self._table.isRowHidden(current_row):
+            current = self._table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+            if current not in indexes:
+                indexes.append(current)
         return indexes
+
+    def _on_selection_changed(self) -> None:
+        self._deselect_hidden()
+        if self._table.currentRow() < 0:
+            # Ctrl+A selects without making a row current: give the details
+            # pane and Edit / Show Source the first visible selected row,
+            # without touching the selection.
+            selected = self.selected_indexes()
+            if selected:
+                self._set_current_row(selected[0])
+        self._selection_changed()
+
+    def _set_current_row(self, index: int) -> None:
+        for row in range(self._table.rowCount()):
+            if self._table.item(row, 0).data(Qt.ItemDataRole.UserRole) == index:
+                self._table.setCurrentCell(
+                    row, COL_NAME, QItemSelectionModel.SelectionFlag.NoUpdate
+                )
+                return
+
+    def _deselect_hidden(self) -> None:
+        """Drop hidden rows from the selection (and from the current row)."""
+        if self._deselecting:
+            return
+        model = self._table.selectionModel()
+        hidden = [index for index in model.selectedRows() if self._table.isRowHidden(index.row())]
+        current_row = self._table.currentRow()
+        current_hidden = current_row >= 0 and self._table.isRowHidden(current_row)
+        if not hidden and not current_hidden:
+            return
+        self._deselecting = True
+        try:
+            flags = QItemSelectionModel.SelectionFlag.Deselect | QItemSelectionModel.SelectionFlag.Rows
+            for index in hidden:
+                model.select(index, flags)
+            if current_hidden:
+                visible = [
+                    index.row()
+                    for index in model.selectedRows()
+                    if not self._table.isRowHidden(index.row())
+                ]
+                if visible:
+                    # NoUpdate: move the current row without clearing the
+                    # rest of the selection.
+                    self._table.setCurrentCell(
+                        visible[0], COL_NAME, QItemSelectionModel.SelectionFlag.NoUpdate
+                    )
+                else:
+                    self._table.setCurrentItem(None)
+        finally:
+            self._deselecting = False
 
     def select_indexes(self, indexes: list[int]) -> None:
         self._table.clearSelection()
@@ -615,13 +695,17 @@ class PdfReviewDialog(QDialog):
                 return
 
     def _selection_changed(self) -> None:
-        index = self.selected_index()
-        item = self._session.items[index] if index is not None else None
+        item = self._reference_item()
         has_item = item is not None and item.state != STATE_PUBLISHED
+        # The buttons say how many (visible) rows they will act on.
+        count = len(self.selected_indexes()) if has_item else 0
+        suffix = f" ({count})" if count > 1 else ""
         self._edit_button.setEnabled(has_item)
         self._approve_button.setEnabled(has_item)
+        self._approve_button.setText(f"Approve Selected{suffix}")
         self._exclude_button.setEnabled(has_item)
-        self._exclude_button.setText("Include" if item is not None and item.excluded else "Exclude")
+        verb = "Include" if item is not None and item.excluded else "Exclude"
+        self._exclude_button.setText(f"{verb}{suffix}")
         self._source_button.setEnabled(
             item is not None
             and item.raw.page_number is not None
@@ -691,8 +775,7 @@ class PdfReviewDialog(QDialog):
     # -- actions ----------------------------------------------------------------
 
     def _current_item(self) -> ImportItem | None:
-        index = self.selected_index()
-        return self._session.items[index] if index is not None else None
+        return self._reference_item()
 
     def _run(self, action) -> None:
         self._error.setText("")

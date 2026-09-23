@@ -63,7 +63,7 @@ constants and their tuning, in [11 — Scanned page processing](11-scanned-page-
 
 `scan.py` needs only numpy.
 
-1. **Render** the page at `ocr_dpi` (150 by default) in grayscale.
+1. **Render** the page at `ocr_dpi` (200 by default) in grayscale.
 2. **Skew.** Long horizontal ink runs are isolated with a one-dimensional
    morphological opening; each run is fitted with a line and the
    length-weighted median angle is the page skew. Anything beyond 5° is
@@ -73,17 +73,22 @@ constants and their tuning, in [11 — Scanned page processing](11-scanned-page-
    at least 40 % of the width; vertical rules span at least 20 % of the
    height. Rules that do not intersect the others' extent (signature lines,
    logos) are dropped. The result is a grid of row and column boundaries.
-4. **Text boxes.** From the text layer (`page.get_text("words")`, transformed
-   into displayed coordinates) or from OCR on the deskewed render. Each box
-   lands in the cell containing its centre. Boxes in a cell are grouped into
-   lines by vertical overlap, sorted left to right, and joined; lines are
-   joined with newlines so stacked content ("AOAL" over "LH Angle Of
-   Attack") stays distinguishable.
-5. **Second pass.** After the header is mapped, every empty cell in a
-   mapping-critical column that still contains ink is cropped, split into
-   text lines by its ink profile, and passed to the OCR *recognizer* only.
-   Text detectors routinely skip isolated glyphs such as a lone `0`; the
-   recognizer reads them.
+4. **Cell text.** With a text layer, the layer's words
+   (`page.get_text("words")`, transformed into displayed coordinates) land in
+   the cell containing their centre, are grouped into lines by vertical
+   overlap, sorted left to right and joined; lines are joined with newlines
+   so stacked content ("AOAL" over "LH Angle Of Attack") stays
+   distinguishable. Without a text layer, every grid cell is cropped from
+   the deskewed render (inside the ruling lines, trimmed of line residue),
+   skipped when it holds no ink, otherwise split into text lines by its ink
+   profile and read line by line by the OCR *recognizer*. No text detection
+   runs on the page, so isolated glyphs such as a lone `0` are read like any
+   other cell and text cannot land in a neighbouring cell.
+5. **Page detection (optional).** `ocr_cells = False` selects the older
+   path: RapidOCR's detector finds text lines on the whole render, each box
+   lands in the cell under its centre, and empty mapped cells get a
+   recognition-only second pass. It is slower and less accurate; it is kept
+   for comparison.
 
 Every cell records its page, bounding box (displayed page coordinates, the
 same space `render_region_png` uses for "Show Source"), text source
@@ -92,14 +97,18 @@ the second pass.
 
 ### The OCR engine
 
-`RapidOcrEngine` wraps `rapidocr-onnxruntime` (ONNX models bundled with the
-package, CPU only, no Tesseract). It is loaded lazily on the first page that
-needs it; when the package is missing the page is reported with
-`PDF_EXTRACTION_REVIEW_REQUIRED` and skipped, never silently. A page takes
-roughly 20 seconds. Known quirks: the recognizer returns a small `0` as the
-CJK full stop `。` (repaired, see below), it drops spaces inside some lines
-(`PitchAttitude#1`), and its detector downsamples the page, which is why the
-second pass exists. `ocr="never"` in the profile disables it.
+`RapidOcrEngine` wraps `rapidocr-onnxruntime` (CPU only, no Tesseract). It
+is loaded lazily on the first page that needs it; when the package is
+missing the page is reported with `PDF_EXTRACTION_REVIEW_REQUIRED` and
+skipped, never silently. `ocr="never"` in the profile disables it. The
+detector is RapidOCR's own; the *recognizer* is the English PP-OCRv3 model
+bundled with this package (`ocr_recognizer = "en"`), because RapidOCR's
+default Chinese-plus-Latin recognizer returns a small `0` as the CJK full
+stop `。`, drops spaces inside lines (`PitchAttitude#1`) and misreads more
+digits; the 180° angle classifier is off because it flips short crops (`ON`
+→ `NO`, `9` → `6`). A page takes roughly 8 seconds at the default 200 dpi.
+The settings, the measurements behind them and the benchmark tool are in
+[11 — Scanned page processing](11-scanned-page-processing.md).
 
 ## Header recognition
 
@@ -224,7 +233,10 @@ reported as a document-level issue and shown in the review dialog:
 | --- | --- | --- |
 | `page_range` | all pages | `(first, last)` pages to read. |
 | `ocr` | `auto` | `never` reports scanned pages without a text layer instead of reading them. |
-| `ocr_dpi` | 150 | Render resolution for scanned pages. |
+| `ocr_dpi` | 200 | Render resolution for scanned pages. |
+| `ocr_recognizer` | `en` | OCR recognizer model: `en` (bundled English), `ch` (RapidOCR's own) or a model file path; `ocr_keys_path` names its character list when needed. |
+| `ocr_angle_classifier` | false | RapidOCR's 180° line classifier (off for deskewed tables). |
+| `ocr_cells` | true | Recognise each grid cell on its own crop; `false` = page-level text detection with a second pass. |
 | `ocr_confidence_threshold` | 0.6 | Below this, a critical field is flagged. |
 | `frequency_unit` | `auto` | `hz` or `seconds`. |
 | `multiword_bits` | `auto` | `per_word` or `range_per_word`. |
@@ -303,9 +315,9 @@ changes underneath it (for example after the WPS is corrected).
 
 ## The review dialog
 
-![PDF review dialog on the CN235-220 document](../img/mockups_no_data/pdf_import_review.png)
+![PDF review dialog on the CN235-220 document](../img/mockups/pdf_import_dialogue.png)
 
-*The review dialog on the 21-page scanned document: 185 rows approved automatically, 123 flagged for review, the first row selected with its verbatim cells.*
+*The review dialog on the 21-page scanned document: 328 rows, 311 approved automatically, 13 held for review (each with an error to fix or exclude), the selected row's verbatim cells below.*
 
 
 Opened automatically after an import, or from the Import page's review
@@ -353,15 +365,19 @@ rows are greyed out.
 A practical way through a large document: apply the metadata, declare the
 conventions the importer detected or flagged and re-normalize, filter
 "Needs review", type a reason such as `subframe_repaired` in the search box,
-select the visible rows, check a few with Show Source, approve the
-selection, and repeat per reason. Rows with errors get Edit; rows that are
-not parameters at all (a sync word, a stamp-garbled line) get Exclude.
+select the visible rows (Ctrl+A or a Shift+click range), check a few with
+Show Source, approve the selection, and repeat per reason. The selection is
+bounded by the filter: rows that "Show" or the search box hide are never
+part of Approve Selected or Exclude, even though a range selection passes
+over them, and the buttons say how many rows they will act on. Rows with
+errors get Edit; rows that are not parameters at all (a sync word, a
+stamp-garbled line) get Exclude.
 
 ## The CN235-220 document
 
-![Dataframe page after publishing the CN235-220 import](../img/mockups_with_data/dataframe_data.png)
+![Dataframe page after publishing the CN235-220 import](../img/mockups/dataframe.png)
 
-*The published document on the Dataframe page: 122 parameters, 0 errors, 14 warnings (discretes without state labels and overlapping fields in word 212).*
+*The published document on the Dataframe page: 311 parameters, 0 errors, 35 warnings (discretes without state labels and overlapping fields, for example in words 212 and 249).*
 
 
 `examples/Scanned_from_UK_Lexmark03-12-2025-123425 (1) data frame.pdf` is a
@@ -374,13 +390,17 @@ in seconds**), Word Location (`14-15, 142-143`), A717 MSB / A717 LSB (`9-1`
 (sometimes `offset, resolution`), True State, False State, Notes. It states
 256 WPS.
 
-Importing all pages takes about 2.5 minutes and yields 326 rows, of which
-about 175 are approved automatically, both conventions are detected, and the
-display-mode row split between pages 12 and 14 is merged. Importing pages
-3–13 (`ImportProfile(page_range=(3, 13))`) takes four seconds. The remaining
-flagged rows are OCR corrections to confirm, overlap warnings that reveal
-misread bit or word numbers, stamp-garbled last rows, and a few enumerated
-multi-bit discretes (see limitations).
+Importing pages 3–13 (`ImportProfile(page_range=(3, 13))`, the text-layer
+pages) takes four seconds and yields 195 rows, 146 of them approved
+automatically. The eight image-only pages 14–21 take about 11 s each with
+the default OCR settings and yield 133 rows, 105 approved automatically (with
+the previous OCR settings it was 43 of 132, with 50 digit repairs instead of
+6; see [11 — Scanned page processing](11-scanned-page-processing.md#13-accuracy-what-helps-and-what-does-not-work)).
+Both conventions are detected, and the display-mode row split between pages
+12 and 14 is merged. The remaining flagged rows are OCR corrections to
+confirm, overlap warnings that reveal misread bit or word numbers,
+stamp-garbled last rows, and a few enumerated multi-bit discretes (see
+limitations).
 
 ## Synthetic documents
 

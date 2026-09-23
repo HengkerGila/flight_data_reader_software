@@ -113,9 +113,9 @@ re-normalize.
 flagged even when correct; that is the point. Use Show Source to confirm,
 then approve.
 
-**Import is slow.** OCR costs about 20 seconds per scanned page without a
-text layer. Use `page_range` to import the pages you need, or run the import
-once and export the published dataframe to `.adb`.
+**Import is slow.** OCR costs about 10 seconds per scanned page without a
+text layer (CPU only). Use `page_range` to import the pages you need, or run
+the import once and export the published dataframe to `.adb`.
 
 **"Consider using the pymupdf_layout package".** A hint printed by PyMuPDF;
 the importer silences it. If it appears, it is harmless.

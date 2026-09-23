@@ -23,6 +23,10 @@ arinc717-reader = "arinc717_reader.app:main"
 [tool.setuptools.packages.find]
 include = ["arinc717_reader*"]
 
+[tool.setuptools.package-data]
+# The English OCR recognizer bundled with the scanned-page importer.
+"arinc717_reader.dataframe.pdf_importer" = ["models/*.onnx", "models/*.txt", "models/README.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # This machine sources ROS Jazzy, whose pytest plugins leak in via PYTHONPATH

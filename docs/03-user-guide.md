@@ -2,9 +2,9 @@
 
 ## The main window
 
-![Main window before anything is loaded](../img/mockups_no_data/frame_view.png)
+![Main window during a live stream](../img/mockups/frame_view.png)
 
-*The main window at start-up: menu bar, the stream toolbar, the header line, the tabs, an empty Frame View and the status bar.*
+*The main window: menu bar, the stream toolbar with the stream state, the header line, the tabs, the Frame View with the Parameter Bits panel and the Word Inspector, and the status bar.*
 
 
 ```
@@ -76,9 +76,9 @@ version.
 
 ## Frame View
 
-![Frame View with a paused live frame](../img/mockups_with_data/frame_view_data.png)
+![Frame View during a live stream](../img/mockups/frame_view.png)
 
-*A paused live frame: word addresses down the side, SF1–SF4 across, HEX representation, the Word Inspector on the right.*
+*A frame under reception: word addresses down the side, SF1–SF4 across (SF1 and SF2 received, SF3 and SF4 pending), HEX representation; the Parameter Bits panel and the Word Inspector on the right.*
 
 
 The Frame View shows the canonical frame as a table with one row per word
@@ -96,13 +96,18 @@ centred, monospaced, and formatted in the selected representation.
 
 The frame's WPS follows the loaded dataframe; with no dataframe it is 256.
 
-**Single click** on a cell opens it in the **Word Inspector** on the right.
-**Double click** opens the **edit dialog**.
+**Single click** on a cell opens it in the **Word Inspector** on the right;
+from there the **arrow keys** move the selection and the inspector follows.
+The selected cell is drawn in the selection colour and the rest of its row is
+tinted, so the same word address can be compared across SF1 to SF4 at a
+glance. **Double click** opens the **edit dialog**. The selected cell is kept
+when a new frame replaces the current one, as long as the address still
+exists.
 
 ### Word Inspector
 
 The inspector is a diagnostic panel that exposes the full decoding chain of
-the clicked word. It shows the raw word in all four representations and then,
+the selected word. It shows the raw word in all four representations and then,
 for every parameter mapped to that word in that subframe, a block like:
 
 ```
@@ -126,6 +131,26 @@ If several parameters share the word, every one is listed. For multi-segment
 parameters the *extracted bits* line shows only this word's segment; the
 *decoded decimal* and *engineering* lines refer to the whole assembled value.
 The panel updates whenever the frame or the decoded values change.
+
+### Parameter Bits panel
+
+Above the Word Inspector sits the **Parameter Bits** panel. It shows the raw
+words behind one decoded sample chosen on the Parameters page (select the
+row and press **Show in Frame View**, or double-click it):
+
+- a summary line with the parameter, occurrence, subframe, type, engineering
+  value and status;
+- one row per **segment**, in assembly order (first row = most significant
+  bits): subframe, word address, bit range, the twelve bits of the word with
+  the segment's bits highlighted and the rest dimmed, and the extracted bits
+  with their value. A parameter built from several words, such as a
+  coarse/fine altitude or a word pair, shows all of its words stacked;
+- the assembled bits, decoded decimal, conversion and engineering value.
+
+The words are outlined in the frame table and the first one is selected, so
+the Word Inspector shows it; clicking a segment row selects that word
+instead. The panel follows the frame, so during a stream the bits change as
+the sample's subframe arrives. **Clear** stops following the sample.
 
 ### Editing a word
 
@@ -167,9 +192,9 @@ saved.
 
 ## Parameters
 
-![Parameters page](../img/mockups_with_data/parameters_data.png)
+![Parameters page](../img/mockups/parameters.png)
 
-*One row per decoded sample of the current frame; selecting a row shows its full decode trace underneath.*
+*One row per decoded sample of the current frame, refreshed in place during a stream; selecting a row shows its full decode trace underneath, and Show in Frame View opens its words in the Frame View.*
 
 
 The Parameters page lists every decoded **sample**: one row per parameter,
@@ -194,15 +219,25 @@ trace** below the table: every segment with its subframe, word, bit range,
 the word value and the extracted bits, then the assembled bits, decoded
 decimal, resolution, offset and engineering value. See
 [05 — Decoding](05-decoding-and-encoding.md) for the meaning of each status.
+**Show in Frame View** (or a double-click on the row) switches to the Frame
+View with the sample's words in the [Parameter Bits panel](#parameter-bits-panel).
 
 During a live stream or a replay the table holds the latest value of every
 (parameter, occurrence, subframe) sample and changes subframe by subframe.
+The values change in place: the selected row, its decode trace and the scroll
+position stay put while the stream runs, so a row can be followed with the
+arrow keys. When the set of rows itself changes (another dataframe, a
+parameter added or removed) the same sample is selected again.
+
+Column widths are fixed: drag a header edge to change one, and Description
+takes the remaining width. They are never re-fitted to the values, so the
+layout does not move during a stream.
 
 ## Graphs
 
-![Graphs page](../img/mockups_with_data/graphs_data.png)
+![Graphs page](../img/mockups/graphs.png)
 
-*A 30-second window of one parameter with the statistics box and the overlay list of parameters that share its unit.*
+*A 30-second window of the AOAR parameter with the statistics box and the overlay list of parameters that share its unit.*
 
 
 The Graphs page plots the history of decoded samples that the live stream
@@ -251,9 +286,9 @@ is reached first (spec v2 §26N).
 
 ## Dataframe
 
-![Dataframe page](../img/mockups_with_data/dataframe_data.png)
+![Dataframe page](../img/mockups/dataframe.png)
 
-*Metadata line, parameter tree, details pane and the validation issues of the loaded dataframe (14 warnings from the scanned document).*
+*Metadata line, the 311 imported parameters, the details pane with mapping and provenance, and the validation issues of the loaded dataframe (35 warnings from the scanned document).*
 
 
 The Dataframe page is where a dataframe is browsed, inspected and edited.
@@ -320,13 +355,9 @@ round-trips.
 
 ## Hardware
 
-![Hardware page before connecting](../img/mockups_no_data/hardware.png)
+![Hardware page connected](../img/mockups/hardware.png)
 
-*Before connecting: port, baud, protocol and virtual speed are editable; everything else waits for a connection.*
-
-![Hardware page connected](../img/mockups_with_data/hardware_data.png)
-
-*Connected to the virtual device and paused: stream progress, simulated signals, diagnostics and the event log.*
+*Connected to the virtual device and streaming: the connection settings are locked while connected; stream progress, simulated signals, diagnostics, fault injection and the event log with the handshake replies.*
 
 
 The Hardware page connects the application to the STM32 stream emulator, or
@@ -438,9 +469,9 @@ complete record. The format is described in
 
 ## Import
 
-![Import page after a PDF import](../img/mockups_with_data/import_data.png)
+![Import page after a PDF import](../img/mockups/import.png)
 
-*After publishing a PDF import: the review queue reports what was loaded and the validation results list the warnings.*
+*After publishing a PDF import: the review queue reports what was loaded (311 parameters from FDS81.pdf) and the validation results list the warnings.*
 
 
 **ADB dataframes.** Import ADB…, Export ADB…, Load Demo Dataframe, New
@@ -460,10 +491,6 @@ publishing, the line reports what was loaded.
 **Validation results.** The current dataframe's summary and issues.
 
 ## Help
-
-![Help tab](../img/mockups_no_data/help.png)
-
-*The Help tab: section list, search box and the guide with its table of contents.*
 
 
 The last tab is the in-application user guide: a section list on the left
@@ -516,16 +543,17 @@ implausible values or a non-`VALID` status on the Parameters page.
 
 ### Import a dataframe document (PDF)
 
-![PDF review dialog](../img/mockups_no_data/pdf_import_review.png)
+![PDF review dialog](../img/mockups/pdf_import_dialogue.png)
 
-*The review dialog: rows in green are approved, the selected row needs review because its resolution cell held two numbers.*
+*The review dialog filtered to "Needs review": 311 of 328 rows were approved automatically; the 13 shown carry an error each (an unreadable resolution, a bit number outside 1–12) and must be edited or excluded before publishing.*
 
 
 1. File → Import PDF…, choose the document, wait for the progress dialog.
 2. In the review dialog confirm WPS and sync words (Apply Metadata), then
    declare any conventions the importer flagged (Re-normalize).
 3. Filter "Needs review", work through rows with Show Source…, Edit…, Approve
-   Selected or Exclude.
+   Selected or Exclude. Ctrl+A or a Shift+click range selects only the rows
+   the filter shows; the buttons say how many rows they will act on.
 4. Publish to Workspace. The dataframe is now loaded and marked unexported;
    Export ADB… writes it.
 

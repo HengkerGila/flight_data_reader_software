@@ -32,7 +32,14 @@ from ...domain.parameter import (
     normalize_source_type,
 )
 from ..editor import ALL_SUBFRAMES, parse_subframes
-from .raw import CRITICAL_FIELDS, SOURCE_NATIVE, SOURCE_OCR, SOURCE_TEXT_LAYER, RawParameterRow
+from .raw import (
+    CRITICAL_FIELDS,
+    DEFAULT_OCR_RECOGNIZER,
+    SOURCE_NATIVE,
+    SOURCE_OCR,
+    SOURCE_TEXT_LAYER,
+    RawParameterRow,
+)
 
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
@@ -65,7 +72,22 @@ class ImportProfile:
     default_wps: int = 256
     page_range: tuple[int, int] | None = None
     ocr: str = OCR_AUTO
-    ocr_dpi: int = 150
+    # Render resolution for scanned pages.  200 dpi reads about two points
+    # more cells than 150 on the benchmark at no extra time; 300 gains
+    # nothing worth its time (tools/ocr_bench.py).
+    ocr_dpi: int = 200
+    # Recognizer model: "ch" (RapidOCR's own), "en" (bundled English) or a
+    # model file path; ``ocr_keys_path`` names its character list when the
+    # model file does not embed one.
+    ocr_recognizer: str = DEFAULT_OCR_RECOGNIZER
+    ocr_keys_path: str | None = None
+    # RapidOCR's 180° line classifier; off because deskewed tables have no
+    # upside-down lines and it flips short crops ("ON" → "NO", "9" → "6").
+    ocr_angle_classifier: bool = False
+    # Recognize each grid cell on its own crop (True) rather than detecting
+    # text lines on the whole page first: short strings such as a lone "0"
+    # are read like any other cell and text cannot land in a neighbour.
+    ocr_cells: bool = True
     ocr_confidence_threshold: float = 0.6
     blank_subframe_means_all: bool = False
     zero_subframe_means_all: bool = True

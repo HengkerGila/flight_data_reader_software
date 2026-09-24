@@ -206,9 +206,9 @@ occurrences therefore appears eight times.
 | Mnemonic, Description, Type | From the dataframe. Type is the canonical type (`analog_signed`, `analog_unsigned`, `bcd`, `discrete`, `raw`, `unknown`). |
 | Occ, SF | Occurrence index and the subframe this sample came from. |
 | Raw | The assembled raw bits of all segments, most significant first. |
-| Decimal | The decoded decimal: two's-complement value for signed parameters, the integer for unsigned, the digit value for BCD, the field value for discretes. |
+| Decimal | The decoded decimal: two's-complement value for signed parameters, the integer for unsigned, the digit value for BCD (the weighted sum of the digits when the dataframe gives one weight per word part), the field value for discretes. |
 | Resolution, Offset | The linear conversion; shown only for analog and BCD types. |
-| Engineering | The converted value, or the state label for discretes. |
+| Engineering | The converted value, or the state label for discretes (from the parameter's state table, else its `1 =` / `0 =` labels). |
 | Unit | From the dataframe. |
 | Source | Where the parameter definition came from (`adb`, `pdf`, `demo`, `manual`, `repository`). |
 | Status | `VALID`, or a diagnostic status; non-valid statuses are coloured. |
@@ -315,23 +315,33 @@ offset, occurrence count), expandable into occurrences and segments
 (`SF 1,2,3,4  word 004  bits 12-3`).
 
 **Details panel.** For the selected parameter: identity, source and canonical
-type, unit, conversion, range, discrete states, notes, the full mapping with
-any preserved legacy flags, and the **provenance**: the source type, the
-record index and the verbatim source record for `.adb` imports, trailing
-unknown fields, and for PDF imports the page, table, row and raw cells. Below
-that, the preserved unknown settings fields of an `.adb` header are listed.
+type, unit, conversion, range, decimals (`auto` when derived from the
+resolution), the discrete states (the `1 =` / `0 =` labels and, for a
+multi-state discrete, the whole table), notes, the full mapping with any BCD
+digit weight and preserved legacy flag per segment, and the **provenance**:
+the source type, the record index and the verbatim source record for `.adb`
+imports, trailing unknown fields, any *import note* (what the ADB parser had
+to guess or ignore, such as a subframe selector it did not use), and for PDF
+imports the page, table, row and raw cells. Below that, the preserved
+unknown settings fields of an `.adb` header are listed.
 
 **Validate Dataframe** re-runs validation; the issues table lists every issue
 with its severity, rule name, parameter and message. **Export ADB…** writes
-the dataframe and clears the modified marker.
+the dataframe in the AFDA layout ([06](06-adb-format.md)) and clears the
+modified marker: a parameter that is unchanged since its import is written
+back exactly as it was read, everything else is generated from its
+definition. Notes have no column in that format and are not exported.
 
 ### The parameter editor
 
 The editor dialog has three parts.
 
 1. **Definition form.** Mnemonic (required), description, source type,
-   unit, resolution and offset, minimum and maximum, the discrete state
-   labels ("1 =" and "0 ="), and notes. The **source type** is an editable
+   unit, resolution and offset, minimum and maximum, decimals (blank means
+   "auto": derived from the resolution), the discrete state labels ("1 ="
+   and "0 ="), and notes. A discrete imported with a multi-state table keeps
+   the table across an edit; the two labels update its rows 1 and 0. The
+   **source type** is an editable
    combo box (Signed Analog, Unsigned Analog, BNR, BCD, Discrete, Raw, or any
    text); the canonical type shown next to it is *derived* from that text by
    the same normalisation every importer uses, so it can never disagree with
@@ -349,9 +359,14 @@ The editor dialog has three parts.
    issues stay visible on the page). Invalid *input*, such as a non-numeric
    word, keeps the dialog open with a message.
 
-Every committed edit re-decodes the current frame immediately. Edited
-parameters keep their preserved raw fields, so an edited `.adb` import still
-round-trips.
+Every committed edit re-decodes the current frame immediately. An edited
+parameter keeps its provenance and its state table; on export it is
+regenerated in the AFDA layout, while the untouched parameters of an `.adb`
+import are still written back verbatim. One caveat: the editor rebuilds the
+mapping rows without BCD digit weights, so a BCD parameter imported with
+one weight per word part decodes as plain nibble BCD after it has been
+edited in this dialog (and is exported without weights); reload the file to
+get the weights back.
 
 ## Hardware
 
@@ -476,7 +491,9 @@ complete record. The format is described in
 
 **ADB dataframes.** Import ADB…, Export ADB…, Load Demo Dataframe, New
 Dataframe…. Import errors are shown in a message box with the parser's
-record-level explanation.
+record-level explanation; a file written in this project's earlier
+provisional layout is refused with `expected 238 (AFDA layout)` and has to
+be recreated (see [10 — Troubleshooting](10-troubleshooting.md#adb-files)).
 
 **PDF dataframes (Experimental).** Import PDF… runs the pipeline of
 [07 — PDF import](07-pdf-import.md) in the background with a progress dialog
@@ -587,8 +604,9 @@ The review dialog is described in detail in
 
 ### Connect the STM32 board
 
-1. Build and flash the firmware and wire PA9 → RXD, PA10 ← TXD, GND (see the
-   [firmware README](../firmware/stm32f103_sim_a717/README.md)).
+1. Build and flash the SIM-A717 firmware and wire PA9 → RXD, PA10 ← TXD,
+   GND, as described in the README that ships with the firmware sources
+   (kept outside this repository).
 2. Load the dataframe the board should stream.
 3. Hardware tab → **Refresh**, pick the FTDI port (`/dev/ttyUSB0` on Linux,
    `COMn` on Windows), baud 115200, protocol "continuous word stream",

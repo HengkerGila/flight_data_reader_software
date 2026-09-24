@@ -400,9 +400,12 @@ in the second), so the plot reads in real time.</p>
         1,
         """
 <p>The loaded dataframe as a tree: one row per parameter with type, unit, resolution,
-offset and a summary of its mapping; the details pane shows the full mapping (occurrences,
-segments, subframes, word, bits) and the provenance (where the definition came from: ADB
-record, PDF page and cell, or manual entry).</p>
+offset and a summary of its mapping; the details pane shows the conversion, range,
+decimals, the discrete states (the two labels or the whole state table), the full mapping
+(occurrences, segments, subframes, word, bits, BCD digit weights) and the provenance
+(where the definition came from: ADB record, PDF page and cell, or manual entry). An
+<i>import note</i> line means the ADB parser had to guess or ignore something in that
+record, for example a subframe selector on a frame-absolute word.</p>
 """
         + _table(
             ["Control", "What it does"],
@@ -435,8 +438,10 @@ for), and whether a superframe is present (recognised, not decoded).</p>
 
 <p><b>Parameter editor</b>: mnemonic and description; the source type as written in the
 document (it is turned into the canonical type exactly as the importer does); unit,
-resolution and offset of the linear conversion; declared minimum and maximum; the true and
-false state names for discretes. The mapping table has one row per <b>segment</b>:
+resolution and offset of the linear conversion; declared minimum and maximum; decimals
+(leave blank for "auto", derived from the resolution); the true and false state names for
+discretes (a discrete imported with a multi-state table keeps the table, the two names
+update its rows 1 and 0). The mapping table has one row per <b>segment</b>:
 occurrence, sequence within the occurrence, subframes (<code>1,3</code> or <code>1-4</code>),
 word address, LSB and MSB (bits numbered 12 = most significant down to 1). <b>Add
 Segment</b> adds a row to the current occurrence, <b>Add Occurrence</b> starts a new
@@ -636,6 +641,8 @@ back from a working board.</p>
                 ["INVALID_WORD: the frame is being received live", "Editing a cell while the stream runs.", "Press ❚❚ Pause stream, then edit."],
                 ["Decode status other than VALID", "The sample could not be decoded (bad mapping, unsupported type, out-of-range BCD digit …).", "Select the row on the Parameters page and read the trace; fix the parameter on the Dataframe page."],
                 ["DF: n ERRORS", "The dataframe has validation errors (overlapping bits, words beyond WPS, missing mapping …).", "Dataframe → Validate Dataframe lists them; edit the parameters."],
+                ["ADB_PARSE_ERROR: … expected 238 (AFDA layout)", "The .adb file was written in this application's earlier, provisional layout, which is no longer read. Files from AFDA open as they are.", "Recreate the dataframe (re-import the PDF or re-enter it) and export it again."],
+                ["ADB_WRITE_ERROR", "A parameter cannot be expressed in an AFDA record: more than 32 sample locations or more than 32 discrete states.", "Split the parameter or reduce its samples, then export again."],
             ],
         ),
     ),
@@ -656,8 +663,9 @@ back from a working board.</p>
                 ["Occurrence", "One independent sample position of a parameter (a parameter recorded twice per second has two occurrences)."],
                 ["Segment", "One contiguous bit range in one word; an occurrence made of several segments is assembled in sequence order."],
                 ["Resolution / offset", "engineering = raw × resolution + offset for analog and BCD parameters."],
-                ["Signed / unsigned analog, BCD, discrete, raw", "The canonical parameter types: two's-complement, plain binary, binary-coded decimal, on/off with named states, and untouched bits."],
+                ["Signed / unsigned analog, BCD, discrete, raw", "The canonical parameter types: two's-complement, plain binary, binary-coded decimal (4-bit nibbles, or one digit per word part with its own weight as AFDA files list them), discretes with named states (two labels or a state table), and untouched bits."],
                 ["Dataframe", "The complete set of parameter definitions plus WPS and sync words; stored as <code>.adb</code> or imported from a PDF."],
+                ["AFDA layout", "The record layout of <code>.adb</code> files: a Setting record, then one 238-field record per parameter with frame-absolute word numbers (1 … 4 × WPS), a state table or BCD digit weights, and up to 32 sample locations."],
                 ["Engineering value", "The decoded, converted value in its unit, with a status telling whether the decode was clean."],
                 ["SIM-A717 v1", "The project's own serial protocol between the PC and the stream emulator: 12-bit words in 16-bit little-endian containers plus ASCII commands."],
                 ["Session", "A recorded stream: subframes, samples and events in a <code>.a717session</code> file."],

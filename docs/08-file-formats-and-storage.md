@@ -86,9 +86,9 @@ repo.close()
 | Table | Columns |
 | --- | --- |
 | `dataframe_documents` | id, name, aircraft_type, revision, issue_date, wps, superframe_present, sync_words (JSON list), source_type, source_filename, source_hash, status |
-| `parameters` | id, document_id, param_key (the canonical id), mnemonic, description, source_parameter_type, parameter_type, unit, minimum, maximum, resolution, conversion_offset, formula_type, true_state, false_state, notes, status |
+| `parameters` | id, document_id, param_key (the canonical id), mnemonic, description, source_parameter_type, parameter_type, unit, minimum, maximum, resolution, conversion_offset, formula_type, true_state, false_state, notes, decimals, states (JSON list of `[value, label]` pairs, NULL without a table), status |
 | `parameter_occurrences` | id, parameter_id, occurrence_index |
-| `parameter_segments` | id, occurrence_id, sequence, subframe_selector_raw, word, lsb, msb, legacy_flag |
+| `parameter_segments` | id, occurrence_id, sequence, subframe_selector_raw, word, lsb, msb, legacy_flag, bcd_weight |
 | `source_fields` | id, parameter_id, field_name, raw_text, normalized_value, page_number, bbox, confidence, reviewed — reserved for per-field PDF provenance |
 | `validation_issues` | id, document_id, parameter_id, severity, rule_name, message, resolved |
 | `review_history` | id, document_id, parameter_id, from_state, to_state, timestamp, note |
@@ -100,6 +100,12 @@ records are stored field by field in `adb_legacy_fields` under the scopes
 load, so a save/load cycle followed by an export loses nothing. Foreign keys
 cascade on delete. Loaded parameters carry `provenance.source_type =
 "repository"`.
+
+The columns `decimals`, `states` and `bcd_weight` were added on 2026-09-24
+with the AFDA record layout. `init_schema()` adds any of them that is
+missing (`ALTER TABLE … ADD COLUMN`) when an older database file is opened,
+so existing files keep working; parameters saved before the change load
+with no decimals, no state table and no digit weights.
 
 ## PDF documents
 

@@ -7,8 +7,8 @@ situation; the message gives the detail.
 
 | State | Meaning and what to do |
 | --- | --- |
-| `ADB_PARSE_ERROR` | The `.adb` file is not readable or a record does not match the layout; the message names the record and field. See [06](06-adb-format.md). |
-| `ADB_WRITE_ERROR`, `FRAME_SAVE_ERROR` | The file could not be written (permissions, path). |
+| `ADB_PARSE_ERROR` | The `.adb` file is not readable or a record does not match the AFDA layout; the message names the record and field. `parameter record has N fields, expected 238 (AFDA layout)` means the file was written in this project's earlier provisional layout, which is no longer read (see [ADB files](#adb-files)). See [06](06-adb-format.md). |
+| `ADB_WRITE_ERROR`, `FRAME_SAVE_ERROR` | The file could not be written (permissions, path). `ADB_WRITE_ERROR` also means the dataframe cannot be expressed in an AFDA record: a parameter with more than 32 sample locations (8 Hz in all four subframes is the most) or more than 32 discrete states. |
 | `MISSING_DATAFRAME` | The operation needs a loaded dataframe (edits, connecting to the stream device, whose WPS and sync words come from it; the dataframe must define four sync words). |
 | `MISSING_FRAME` | Nothing to save; generate or load a frame first. |
 | `INVALID_WPS` | WPS must be a positive integer. |
@@ -18,7 +18,7 @@ situation; the message gives the detail.
 | `DATAFRAME_WPS_MISMATCH` | The frame file's WPS differs from the loaded dataframe. Load a matching dataframe first, or generate a new frame. |
 | `INVALID_WORD` | A word outside 0..4095 or an address outside the frame; or an edit attempted while the frame is being received live (`the frame is being received live; stop the stream to edit`: press ❚❚ Pause stream first). |
 | `EMPTY_SCENARIO`, `INVALID_SCENARIO_INPUT` | No target values, or a target that is not a number (scenario service; reachable from the API and the tests only, the Simulator page was removed). |
-| `ENCODE_ERROR` | A requested value does not fit the parameter's mapping (out of signed range, BCD digit overflow, unknown discrete label, word outside the frame). In the stream event log it means a simulated signal's Low/High exceed what the mapping can encode: narrow them on the Hardware page. Also raised when a signal is configured for a parameter that is not encodable. |
+| `ENCODE_ERROR` | A requested value does not fit the parameter's mapping (out of signed range, BCD digit overflow, BCD digit weights that do not form a decade ladder, unknown discrete label, word outside the frame). In the stream event log it means a simulated signal's Low/High exceed what the mapping can encode: narrow them on the Hardware page. Also raised when a signal is configured for a parameter that is not encodable. |
 | `SERIAL_PORT_ERROR` | The port could not be opened (wrong name, in use by another program, no permission) or no SIM-A717 device answered `STOP`/`PING` within 1.5 s (wiring, baud rate, board not running the firmware). |
 | `SERIAL_DISCONNECTED` | The operation needs a connected device, or the port failed while in use. The service reconnects by itself as long as you have not pressed Disconnect. |
 | `INVALID_SIM_PROTOCOL` | Something answered but not as a SIM-A717 v1 device (wrong reply to `PING`, a rejected `SET_WPS`/`SET_SYNC`/`SET_PROTOCOL`), an unknown device mode, fault or signal source was requested, or bad framed packets arrived. |
@@ -46,6 +46,28 @@ situation; the message gives the detail.
   type) and one decode failure. Both are intentional.
 - Overlaps (`semantic.overlap`) are warnings because real dataframes overlay
   spares and supersets; they are shown on both parameters.
+
+## ADB files
+
+- **The details panel shows an "import note".** The parser had to guess or
+  ignore something in that record: a subframe selector other than `1234` on
+  a frame-absolute word (the selector is ignored), a declared samples ×
+  parts count that does not match the locations present, or a non-numeric
+  state value or BCD digit weight. The parameter is loaded as the note says;
+  check its mapping against the source. The notes are listed in
+  [06](06-adb-format.md#legacy-field-helpers).
+- **The exported file differs from the imported one.** Only parameters that
+  were edited are regenerated, in the `1234` + frame-absolute form with
+  plain decimal numbers; an unchanged parameter is written back byte for
+  byte. Notes are never exported (the format has no column for them).
+- **A multi-word BCD decodes wrongly after an edit.** The parameter editor
+  drops the per-digit weights when it rebuilds the mapping, so the field is
+  read as plain nibbles from then on; the details panel no longer shows
+  `BCD weight …` on its segments. Reload the `.adb` file to restore them.
+- **`expected 238 (AFDA layout)` on import.** The file was written by this
+  application before 2026-09-24 in its provisional layout, which is no
+  longer read. Recreate the dataframe (re-import the PDF or re-enter it)
+  and export it again; files written by AFDA open as they are.
 
 ## Live stream (Hardware page)
 
@@ -78,8 +100,9 @@ and Ubuntu).
 **No hardware?** Use the `VIRTUAL` port; every feature of the Hardware page
 works against it, including disconnect and reconnect.
 
-The firmware's own symptoms (no reply, LED, flashing) are in the
-[firmware README](../firmware/stm32f103_sim_a717/README.md#troubleshooting).
+The firmware's own symptoms (no reply, LED, flashing) are covered by the
+troubleshooting section of the README that ships with the firmware sources
+(kept outside this repository).
 
 ## PDF import
 

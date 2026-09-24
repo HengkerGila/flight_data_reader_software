@@ -118,8 +118,11 @@ digits by the same weights.
 `true_state` / `false_state` remain the two-state shortcut (labels of values
 1 and 0). The full table lives in `ParameterDefinition.states`, so a
 multi-bit discrete with values 0..3 keeps its four labels and decodes to
-them. The writer emits the table when present and otherwise derives
-`0=false_state, 1=true_state`.
+them. The parser collapses a table whose values are only 0 and 1 into the
+two labels, so a plain on/off discrete never carries a table; a state slot
+with a label but no value, or a non-integer value, gets the slot index as
+its value and an import note. The writer emits the table when present and
+otherwise derives `0=false_state, 1=true_state`.
 
 ### What the format cannot hold
 
@@ -169,5 +172,12 @@ the best evidence of all.
 meanings: `legacy_setting_fields(metadata)` for the unknown header fields,
 `trailing_legacy_fields(parameter)` for fields beyond 238,
 `segment_legacy_flag(source_raw)` for a location's spare field and
-`adb_warnings(parameter)` for what the parser guessed or ignored. The
-Dataframe page shows all of them in the details panel.
+`adb_warnings(parameter)` for what the parser guessed or ignored: a
+selector other than `1234` on a frame-absolute word (ignored), a declared
+samples × parts count that does not match the locations present, locations
+that do not divide into whole parts, a non-numeric state value or BCD digit
+weight, or a number of weights that differs from the parts count (the
+weights are then dropped). The Dataframe page shows all of them in the
+details panel, the warnings as *import note* lines. A segment's
+`source_raw` also keeps the selector and word text exactly as the file
+wrote them (`adb_selector`, `adb_word`).

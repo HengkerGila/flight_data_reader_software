@@ -33,6 +33,7 @@ DataframeDefinition
 ├── metadata: DataframeMetadata
 └── parameters: list[ParameterDefinition]
       ├── conversion: ConversionRule
+      ├── states: list[DiscreteState]
       ├── occurrences: list[ParameterOccurrence]
       │     └── segments: list[ParameterSegment]
       └── provenance: ParameterProvenance | None
@@ -63,7 +64,9 @@ DataframeDefinition
 | `unit` | str or None | Engineering unit. |
 | `minimum`, `maximum` | float or None | Expected engineering range; values outside it decode with status `OUT_OF_RANGE`. |
 | `conversion` | ConversionRule | `resolution` (default 1.0), `offset` (default 0.0), `formula_type` (`linear` is the only supported formula). |
-| `true_state`, `false_state` | str or None | Discrete labels for a non-zero and a zero field. |
+| `decimals` | int or None | Display precision as the source records it (AFDA column 8). `None` means "derive from the resolution": `effective_decimals()` returns the explicit value, 0 for a discrete, otherwise what the resolution implies (`resolution_decimals()`: 0.25 → 2, 0.0062 → 4, 1 → 0, capped at 4). Shown in the details panel, editable, written on export; the Parameters page does not round values with it. |
+| `true_state`, `false_state` | str or None | The two-state shortcut: the labels of the field values 1 and 0. |
+| `states` | list[DiscreteState] | The full state table (`value` → `label`) of a discrete with more than two states, up to the 32 an AFDA record holds. Empty when the two labels say it all. `effective_states()` returns the table, or the one the two labels imply (`0 = false_state`, `1 = true_state`); `state_label(value)` looks one value up. |
 | `occurrences` | list | The mapping. |
 | `notes` | str or None | Free text. |
 | `provenance` | ParameterProvenance or None | Where the definition came from. |
@@ -74,8 +77,8 @@ DataframeDefinition
 | --- | --- | --- |
 | `analog_signed` | two's complement of the assembled field, then linear conversion | Signed Analog, Signed, BNR Signed, BNR (signed), two's complement |
 | `analog_unsigned` | the assembled field as an integer, then linear conversion | Unsigned Analog, Unsigned, BNR, Analog, Binary |
-| `bcd` | 4-bit digits validated 0–9, then linear conversion | BCD |
-| `discrete` | zero → `false_state`, non-zero → `true_state` | Discrete, Disc, Status, Boolean |
+| `bcd` | 4-bit digits validated 0–9, then linear conversion; when every segment carries a BCD digit weight, the weighted sum of one digit per segment instead | BCD |
+| `discrete` | the state table's label for the field value when the parameter has a table; otherwise zero → `false_state`, non-zero → `true_state` | Discrete, Disc, Status, Boolean |
 | `raw` | the assembled integer, no conversion | Raw |
 | `unknown` | not decoded; status `UNSUPPORTED_TYPE` | anything unrecognised |
 
@@ -104,7 +107,8 @@ class ParameterSegment:
     word: int                        # 1-based word address
     lsb: int                         # bit numbers 12..1, accepted in either order
     msb: int
-    source_raw: dict | None = None   # preserved raw fields (ADB selector text, legacy flag)
+    source_raw: dict | None = None   # preserved raw fields (ADB selector and word text, legacy flag)
+    bcd_weight: float | None = None  # AFDA-style BCD: this segment is one digit with this decimal weight
 ```
 
 Semantics that the decoder and encoder rely on:
@@ -119,6 +123,14 @@ Semantics that the decoder and encoder rely on:
   segments of an occurrence must agree on the subframe set.
 - **Segment sequence defines assembly order**, never the word number. The
   segment with sequence 1 contributes the most significant bits.
+- **BCD digit weights.** When every segment of a BCD occurrence carries a
+  `bcd_weight` (`10, 1` or `10, 1, 0.1`), each segment is one digit and the
+  value is the sum of digit × weight. A `None` weight on any segment means
+  the assembled field is read as plain 4-bit nibbles. The `.adb` parser sets
+  the weights from the file and the repository stores them. The parameter
+  editor does not carry them yet: `build_occurrences()` rebuilds segments
+  without a weight, so a weighted BCD parameter that is edited in the
+  dialog becomes plain nibble BCD (see [09 — Roadmap](09-architecture-and-development.md#roadmap-and-open-ends)).
 
 Example: pressure altitude as a 21-bit value spread over two words.
 
@@ -137,13 +149,17 @@ class ParameterProvenance:
     source_filename: str | None
     record_index: int | None         # record number in the .adb, or row number in a PDF table
     raw_record: tuple[str, ...] | None   # the verbatim source fields / cells
-    extra: dict                      # trailing unknown ADB fields; PDF page, bbox, raw texts, interpretation, review history
+    extra: dict                      # ADB: trailing_fields, adb_warnings, adb_conversion_kind; PDF: page, bbox, raw texts, interpretation, review history
 ```
 
 Provenance answers "where did this value come from?" (spec §30, §58) and is
-shown in the Dataframe page details and the PDF review dialog. The `.adb`
-writer re-emits preserved raw fields, which is what makes the round trip
-lossless.
+shown in the Dataframe page details and the PDF review dialog. For an `.adb`
+import `raw_record` is the complete 238-field record and `adb_warnings`
+lists what the parser had to guess or ignore. The `.adb` writer writes a
+parameter that is still semantically identical to its `raw_record` back as
+that record, byte for byte; anything edited or created in the application
+is generated from the canonical model. That is what makes the round trip
+lossless ([06 — The ADB format](06-adb-format.md#round-trip)).
 
 ## Engineering data
 
@@ -198,7 +214,7 @@ either side.
 | `mapping.segment_sequence` | error | The same segment sequence used twice in an occurrence. |
 | `mapping.subframe_consistency` | error | Segments of one occurrence disagree on subframes. |
 | `semantic.type` | error / warning | The canonical type is not one of the six / it is `unknown` (the parameter will decode as `UNSUPPORTED_TYPE`). |
-| `semantic.discrete_states` | warning | A discrete without any state label. |
+| `semantic.discrete_states` | warning | A discrete with neither of the two labels nor a state table. |
 | `semantic.range` | error | Minimum greater than maximum. |
 | `semantic.overlap` | warning | Two parameters share bits in the same subframe and word; one issue per subframe and word. Overlaps are warnings because real dataframes overlay spares and supersets. |
 
@@ -218,9 +234,16 @@ an edit including overlaps) and `duplicate_parameter()`.
 ## Semantic comparison
 
 `arinc717_reader/dataframe/compare.py` implements the round-trip acceptance
-test of spec §37: `dataframe_differences(a, b)` lists every semantic
-difference between two dataframes — WPS, sync words, preserved settings,
-parameter count and order, every definition field, conversion, trailing
-legacy fields, occurrences, segments, subframes, words, bits and legacy flags
-— and returns an empty list when they are equivalent. Byte-for-byte equality
-of files is deliberately not required.
+test of spec §37: `dataframe_differences(a, b, ignore=())` lists every
+semantic difference between two dataframes — WPS, sync words, preserved
+settings, parameter count and order, every definition field, conversion,
+effective decimals, effective state tables, trailing legacy fields,
+occurrences, segments, subframes, words, bits, BCD digit weights and legacy
+flags — and returns an empty list when they are equivalent.
+`parameter_differences(a, b, ignore=())` does the same for one parameter
+(ids excluded). `ignore` names parameter attributes to leave out: the ADB
+format has no notes column, so an ADB round trip is compared with
+`ignore=("notes",)`. The `.adb` writer uses `parameter_differences` to
+decide whether an imported parameter may be written back verbatim.
+Byte-for-byte equality of files is deliberately not required here, although
+the writer achieves it for unchanged files.

@@ -11,7 +11,7 @@
 | pyserial | 3.5 or newer | COM port access for the hardware-in-the-loop stream (port listing, 8N1 transport) |
 | rapidocr-onnxruntime | 1.3 or newer, optional | OCR for scanned pages without a text layer |
 | pytest | 7.4 or newer, development only | test suite |
-| arm-none-eabi-gcc, openocd or stm32flash | optional | Building and flashing the STM32 stream emulator firmware; not needed to run the application |
+| arm-none-eabi-gcc, openocd or stm32flash | optional | Building and flashing the STM32 stream emulator firmware (sources kept outside this repository); not needed to run the application |
 
 The application runs on Linux, and the GUI works both on a normal display and
 headless with `QT_QPA_PLATFORM=offscreen` (used by the tests). No system
@@ -74,16 +74,18 @@ mismatches are warnings.
 The *Virtual speed* factor on the Hardware page runs the virtual device
 faster than real time; it does nothing for a real port. With a real STM32
 board, pick its FTDI port instead of `VIRTUAL`; building and wiring the board
-is described in the [firmware README](../firmware/stm32f103_sim_a717/README.md)
-and the protocol in [12 — The SIM-A717 v1 protocol](12-sim-a717-protocol.md).
+is described in the README that ships with the firmware sources (kept
+outside this repository) and the protocol in
+[12 — The SIM-A717 v1 protocol](12-sim-a717-protocol.md).
 
 ## Bundled examples
 
 | File | Content |
 | --- | --- |
-| `examples/demo_256wps.adb` | The demo dataframe (256 WPS, 12 parameters covering every parameter type) in `.adb` form. Regenerate with `.venv/bin/python examples/make_demo_adb.py`. |
+| `examples/demo_256wps.adb` | The demo dataframe (256 WPS, 12 parameters covering every parameter type) written in the AFDA layout of [06](06-adb-format.md). Regenerate with `.venv/bin/python examples/make_demo_adb.py`. |
 | `examples/demo_256wps.pdf` | The same dataframe rendered as a born-digital dataframe document, for trying the PDF importer. Regenerate with `.venv/bin/python examples/make_demo_pdf.py`. |
-| `examples/Scanned_from_UK_Lexmark03-12-2025-123425 (1) data frame.pdf` | A real scanned CN235-220 dataframe layout document (21 pages). See [07 — PDF import](07-pdf-import.md#the-cn235-220-document). |
+| `examples/afda_probe/afda_probe_64wps.adb` | A small 64 WPS database in the AFDA layout whose parameters are named after the layout questions they settle once the file is opened in AFDA; `examples/afda_probe/README.md` is the checklist. Regenerate with `.venv/bin/python tools/make_afda_probe.py`. |
+| `examples/FDS81.pdf` | The real scanned CN235-220 dataframe layout document (21 pages) behind the screenshots and the OCR benchmark. Git-ignored and not redistributed. See [07 — PDF import](07-pdf-import.md#the-cn235-220-document). |
 
 The Import page also has a **Load Demo Dataframe** button that loads the demo
 dataframe directly from code, without any file.

@@ -380,9 +380,12 @@ stamp-garbled line) get Exclude.
 *The published document on the Dataframe page: 311 parameters, 0 errors, 35 warnings (discretes without state labels and overlapping fields, for example in words 212 and 249).*
 
 
-`examples/Scanned_from_UK_Lexmark03-12-2025-123425 (1) data frame.pdf` is a
-real ARINC 717 dataframe layout document for the CN235-220 by Flight Data
-Systems: 21 scanned pages, of which pages 3–13 carry an Acrobat text layer
+`examples/FDS81.pdf` (the scan originally named
+`Scanned_from_UK_Lexmark03-12-2025-123425 (1) data frame.pdf`, which is the
+name `tests/test_real_document.py` looks for; the file is git-ignored and
+not redistributed) is a real ARINC 717 dataframe layout document for the
+CN235-220 by Flight Data Systems: 21 scanned pages, of which pages 3–13
+carry an Acrobat text layer
 and 14–21 are image-only and rotated. Its table columns are Parameter
 Mnemonic & Name (stacked), Parameter Type, Frequency (the sample **interval
 in seconds**), Word Location (`14-15, 142-143`), A717 MSB / A717 LSB (`9-1`
@@ -415,9 +418,14 @@ original.
 ## Limitations
 
 - **Enumerated discretes.** A discrete field wider than one bit with a list
-  of states (`0 = map display, 1 = weather radar, …`) is flagged; the states
-  are kept in the notes because the canonical model only labels zero and
-  non-zero.
+  of states (`0 = map display, 1 = weather radar, …`) is flagged and the
+  states are kept in the notes. The canonical model has carried a full
+  state table since the AFDA layout work (`ParameterDefinition.states`,
+  filled by the `.adb` parser and decoded by lookup, see
+  [04](04-data-model.md#parameterdefinition)), but the PDF importer does
+  not fill it yet, so such a parameter decodes with its `1 =` / `0 =`
+  labels only until the table is entered by hand or the file comes from
+  AFDA.
 - **Superframe parameters** are recognised by their rate and rejected.
 - **Non-linear conversions** are not represented.
 - **OCR quality.** Names may lose spaces or letters; digits are corrected

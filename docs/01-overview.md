@@ -11,8 +11,9 @@ value such as *pitch attitude = −30.096 deg*.
 
 The ARINC 717 Reader is a desktop application that:
 
-1. loads a dataframe from an existing `.adb` file, from a dataframe document
-   in PDF form, or from manual entry;
+1. loads a dataframe from an existing `.adb` file (the database format of
+   the AFDA flight-data software), from a dataframe document in PDF form,
+   or from manual entry;
 2. holds ARINC 717 data as a canonical frame of four subframes with a
    configurable number of words per second (256 is the primary target);
 3. shows the raw frame in a **Frame View** with binary, octal, decimal and
@@ -68,7 +69,7 @@ The design keeps three things apart, and the code never mixes them (spec §4):
 
 | Domain | Holds | Lives in |
 | --- | --- | --- |
-| **Canonical dataframe** | *How* bits are interpreted: parameters, types, mappings, conversions, discrete state labels, provenance | `arinc717_reader/domain/dataframe.py`, `domain/parameter.py` |
+| **Canonical dataframe** | *How* bits are interpreted: parameters, types, mappings, conversions, discrete state labels and tables, BCD digit weights, provenance | `arinc717_reader/domain/dataframe.py`, `domain/parameter.py` |
 | **Canonical frame** | *Only* raw 12-bit words: four subframes of WPS integers | `arinc717_reader/domain/frame.py` |
 | **Engineering data** | Decoded values derived from frame + dataframe, each with a trace | `arinc717_reader/domain/engineering.py` |
 
@@ -124,7 +125,7 @@ arinc717_reader/
 ├── decoder/               bit extraction, segment assembly, signed/unsigned/BCD/discrete, conversion
 ├── encoder/               inverse path: parameter encoder and frame builders (scenario simulation)
 ├── dataframe/
-│   ├── adb_codec/         .adb parser, writer, record layout, subframe selector, legacy fields
+│   ├── adb_codec/         .adb parser and writer for the AFDA record layout, subframe selector, legacy fields
 │   ├── validator/         structural, mapping and semantic validation
 │   ├── repository/        SQLite persistence
 │   ├── pdf_importer/      PDF pipeline: ingest, scan, extract, normalize, review, pipeline, synth
@@ -146,7 +147,10 @@ arinc717_reader/
                            Graphs, Dataframe, Hardware, Import, Help), the stream toolbar
                            (stream_controls.py) and the in-app guide (help/)
 
-firmware/stm32f103_sim_a717/   the STM32F103 stream emulator (C, freestanding, Makefile)
+firmware/stm32f103_sim_a717/   the STM32F103 stream emulator (C, freestanding, Makefile);
+                               kept outside the repository, see docs/12
+tools/                         ocr_bench.py (OCR benchmark), make_afda_probe.py (AFDA probe database)
+examples/                      demo dataframe (.adb and .pdf), afda_probe/
 ```
 
 Everything below `ui/` is importable and testable without a Qt application,

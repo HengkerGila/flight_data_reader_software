@@ -12,9 +12,10 @@ stream in one direction and ASCII commands in the other.
 > the same subframe boundary.
 
 The PC side lives in `arinc717_reader/sources/serial/sim_a717_protocol.py`
-(encoding, decoding, constants), the device side in
-`firmware/stm32f103_sim_a717/` ([README](../firmware/stm32f103_sim_a717/README.md))
-and in the virtual device `sources/serial/virtual_device.py`.
+(encoding, decoding, constants), the device side in the STM32F103 firmware
+(`firmware/stm32f103_sim_a717/`, kept outside this repository together
+with its README on wiring, build and flashing) and in the virtual device
+`sources/serial/virtual_device.py`.
 
 ## Link and timing
 

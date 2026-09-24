@@ -41,8 +41,8 @@ used by the encoder, so the convention has one home.
 | --- | --- | --- |
 | `analog_signed` | `twos_complement(assembled, width)`: subtract 2^width when the top bit is set | `decimal × resolution + offset` |
 | `analog_unsigned` | the assembled integer | `decimal × resolution + offset` |
-| `bcd` | digits of 4 bits from the least significant end (a leading partial digit takes the remaining bits), each validated 0–9, read as a decimal number | `decimal × resolution + offset` |
-| `discrete` | the assembled field | `true_state` when non-zero, `false_state` when zero; defaults `TRUE` / `FALSE` when a label is missing |
+| `bcd` | digits of 4 bits from the least significant end (a leading partial digit takes the remaining bits), each validated 0–9, read as a decimal number. **Weighted BCD:** when every segment carries a `bcd_weight`, each segment is one digit field and the decimal is the sum of digit × weight (an integer when the weights allow, else a float rounded to 10 places) | `decimal × resolution + offset` |
+| `discrete` | the assembled field | the state table's label for that value when the parameter has a table (`state_label`); otherwise `true_state` when non-zero, `false_state` when zero; defaults `TRUE` / `FALSE` when a label is missing |
 | `raw` | the assembled integer | the same integer |
 | `unknown` | — | status `UNSUPPORTED_TYPE` |
 
@@ -50,10 +50,18 @@ Rules the code enforces deliberately:
 
 - **Signedness comes from the dataframe**, never from the bit pattern.
 - **BCD is never reinterpreted as binary.** A nibble above 9 gives
-  `INVALID_BCD`.
+  `INVALID_BCD`, in plain and in weighted BCD alike.
+- **BCD digit weights come from the dataframe.** AFDA files list one word
+  part per digit with its decimal weight; the decoder multiplies instead of
+  concatenating nibbles, so a two-part `10, 1` day-of-month and a
+  three-part `10, 1, 0.1` value decode without any assumption about digit
+  positions. A parameter with a weight on only some segments is decoded as
+  plain BCD.
 - **A discrete's meaning comes from its labels.** An active-low signal simply
   has `true_state = "NORMAL"` and `false_state = "WARNING"`; nothing assumes
-  1 means active.
+  1 means active. A multi-bit discrete with a state table (`0 = OFF, 1 =
+  LOW, 2 = MID, 3 = HIGH`) decodes to the table's label; a value missing
+  from the table falls back to the two labels.
 - **Conversion supports** positive and negative resolution and zero,
   positive and negative offset. Only `formula_type = "linear"` is supported;
   anything else gives `UNSUPPORTED_TYPE`.
@@ -88,8 +96,17 @@ gives 31.2 deg, raw 4095 gives −31.45 deg.
 **BCD selected course.** A 12-bit field `0011 0101 1001` splits into digits
 3, 5, 9 → **359**. `0011 1011 0000` fails with `INVALID_BCD` (digit 11).
 
+**Weighted BCD day of month** (the AFDA form). Two segments, sequence 1 in
+word 19 bits 8–5 with weight 10 and sequence 2 in word 19 bits 4–1 with
+weight 1. Extracted `0010` = 2 and `0111` = 7: 2 × 10 + 7 × 1 = **27**. With
+weights `10, 1, 0.1` and digits 2, 7, 5 the decimal is 27.5 before the
+linear conversion.
+
 **Landing gear, discrete.** Bit 1 of word 13 with `true_state = "DOWN"`,
 `false_state = "UP"`: a 1 decodes to **DOWN**.
+
+**Four-state discrete.** Bits 2–1 of word 12 with the state table `0 = OFF,
+1 = LOW, 2 = MID, 3 = HIGH`: `10` = 2 decodes to **MID**.
 
 **Multi-segment altitude.** Word 154 bits 9–1 (`000000101` = 5) and word 153
 bits 12–1 (`000011110000` = 240) assemble to `000000101000011110000`
@@ -108,6 +125,13 @@ engineering value
   → split across the occurrence's segments (inverse of assembly)
   → write each part into its word, in every subframe of the segment
 ```
+
+**Weighted BCD** takes its own path: the inverted value is divided by the
+smallest weight and rounded to an integer, whose decimal digits are dealt
+out one per segment, most significant first. The weights must form a
+decade ladder in segment order (`…, 10, 1, 0.1`); anything else has no
+unique digit split and is refused with `ENCODE_ERROR`, as is a value with
+more digits than segments or a digit that does not fit a segment's width.
 
 `encode_into_frame()` writes **every occurrence** by default so that any
 sample decodes to the value. It returns the raw pattern written.

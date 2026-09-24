@@ -236,8 +236,9 @@ PC is the scenario authority, the device the timing authority):
    `default_config` gives each the **Random Walk** mode (2 % of the span per
    second) over its declared minimum/maximum *clipped to what the mapping can
    encode* (`representable_range`: the field's raw range pushed through the
-   linear conversion; a declared range is often wider than the field, the
-   demo's `FLAP POS` declares −2..45 deg but its field holds −1.6..23.8).
+   linear conversion, for a weighted BCD 0 up to every digit at 9; a
+   declared range is often wider than the field, the demo's `FLAP POS`
+   declares −2..45 deg but its field holds −1.6..23.8).
    Without declared limits the representable range is used. Discretes
    default to a **Step** between their two states every 5 s.
 2. Modes (spec v2 §26H): Fixed, Uniform Random, Random Walk, Sine, Ramp,

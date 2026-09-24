@@ -93,7 +93,7 @@ page driven by its own timer rather than by events: it redraws at most every
 | §24–§26 scenario, encoder, closed loop | `encoder/`, `services/simulation_service.py`; exercised by `tests/test_scenario_roundtrip.py`, the GUI smoke test and `--selftest` (no page, see §45) |
 | §27–§32 dataframe subsystem, PDF import, review | `dataframe/pdf_importer/`, `ui/importer/` |
 | §31 validator | `dataframe/validator/` |
-| §33–§37 ADB codec, round trip | `dataframe/adb_codec/`, `dataframe/compare.py` |
+| §33–§37 ADB codec, round trip | `dataframe/adb_codec/` (the spec's provisional record layout was replaced on 2026-09-24 by the AFDA layout verified against real files, see [06](06-adb-format.md)), `dataframe/compare.py` |
 | §38–§39 repository | `dataframe/repository/` |
 | §40 application state | `state/`, `services/`, `app.py` |
 | §41–§46 UI structure | `ui/main_window.py` and the pages: Frame View, Parameters, Graphs, Dataframe, Hardware, Import, plus a Help tab with the in-app user guide (`ui/help/`, not in the spec) and a stream Start / Pause toolbar (`ui/stream_controls.py`) |
@@ -103,10 +103,10 @@ page driven by its own timer rather than by events: it redraws at most every
 | §52–§53 MVP and acceptance | `tests/` |
 | §56–§57 hardware | `sources/hardware_source.py` (stub for the real ABUS 717 source, spec v2 Phase 14) |
 | v2 §3A runtime levels | `sources/serial/`, `state/`, `streaming/`, `recording/` (see [13](13-live-streaming-graphs-recording.md)) |
-| v2 §26A–§26F HIL simulator, timing, UART, protocol, source chain | `firmware/stm32f103_sim_a717/`, `sources/serial/transport.py`, `sim_a717_protocol.py`, `stream_parser.py`, `synchronizer.py`, `subframe_assembler.py`, `serial_source.py`, `virtual_device.py` |
+| v2 §26A–§26F HIL simulator, timing, UART, protocol, source chain | the STM32F103 firmware (`firmware/stm32f103_sim_a717/`, kept outside this repository), `sources/serial/transport.py`, `sim_a717_protocol.py`, `stream_parser.py`, `synchronizer.py`, `subframe_assembler.py`, `serial_source.py`, `virtual_device.py` |
 | v2 §26G, §26K–§26M live decoding, samples, bus, frequency | `decoder/parameter_decoder.py` (`decode_subframe`), `services/streaming_service.py`, `streaming/parameter_sample.py`, `streaming/sample_bus.py` |
 | v2 §26H signal modes | `streaming/signal_generator.py`, `encoder/parameter_encoder.py` (`only_subframes`) |
-| v2 §26I–§26J commands, fault injection | `services/serial_service.py`, `sources/serial/sim_a717_protocol.py`, firmware `command_receiver.c`, `stream_scheduler.c` |
+| v2 §26I–§26J commands, fault injection | `services/serial_service.py`, `sources/serial/sim_a717_protocol.py`, and in the firmware its command receiver and stream scheduler |
 | v2 §26N time series | `streaming/timeseries_store.py` |
 | v2 §26O–§26Q, §46A Graph View | `ui/graph_view/` |
 | v2 §26R, §46C recording and replay | `recording/`, `sources/replay_source.py`, `services/recording_service.py`; controls in the File menu of `ui/main_window.py` plus the status bar (the toolbar carries stream Start / Pause instead, which also pause and resume a replay) |
@@ -116,14 +116,14 @@ page driven by its own timer rather than by events: it redraws at most every
 
 ## Testing strategy
 
-`tests/` holds more than 200 tests that run in under a minute:
+`tests/` holds 234 tests that run in under a minute:
 
 | Area | Tests |
 | --- | --- |
 | Bits, signed, BCD, discrete, conversion, frame | Unit tests against the spec's oracle values. |
 | Decoder | Demo dataframe and frame fixtures; every status path. |
 | Scenario round trip | Encode → decode within quantization tolerance; encodability rules. |
-| ADB | Parsing of an embedded sample with quoted fields and unknown columns; semantic round trip; error messages. |
+| ADB | The AFDA layout on embedded records: the settings record, multi-rate samples merged into subframe tuples, concatenated parts in `PARTS_ORDER`, BCD digit weights, relative selectors, state tables, import notes for ignored selectors and count mismatches, verbatim write-back of unchanged parameters, regenerated records semantically equal, an edited parameter regenerated while the others are kept, the demo exported in the layout, the 32-location limit, plain number spelling, cp1252 and quoted fields, rejection of the old provisional layout, explicit parse errors, the selector codec, edited sync words and WPS written back. The two real AFDA files round-trip byte for byte when the git-ignored `afda_adb_sample/` folder is present. |
 | Validator, editor | Rule coverage; editing helpers; preservation of raw fields through edits. |
 | Repository | Save/load round trip in memory and on disk. |
 | PDF normalization and review | Pure Python on hand-written raw rows: every rule, the state machine, publishing, re-normalization. |
@@ -188,7 +188,8 @@ normalised text a document uses rather than loosening the fuzzy threshold.
   rule they enforce.
 - Logging uses `event=name key=value` messages at INFO for user-level
   operations and DEBUG for per-decode details; no per-word INFO logs.
-- Files are UTF-8; ADB output is CRLF CSV.
+- Source files are UTF-8; ADB output is cp1252 CRLF CSV in the AFDA layout
+  with plain decimal numbers (never an exponent).
 
 ## Roadmap and open ends
 
@@ -199,7 +200,9 @@ normalised text a document uses rather than loosening the fuzzy threshold.
 | UART framing | Only the baud rate is selectable; data bits, parity and stop bits are fixed at 8N1 on both sides. |
 | Firmware WPS ceiling | 512 (two frame buffers in 20 KB SRAM); the PC side and the virtual device go to 4096. |
 | Simulator page (spec §45) | Removed from the GUI at the user's request; `SimulationService` and the scenario encoder stay as core code for the tests and the selftest. |
-| Enumerated multi-bit discretes | Flagged at import, states kept in notes; the model needs a state table and the decoder a lookup. |
+| Enumerated multi-bit discretes | The model carries a state table, the `.adb` codec reads and writes it, the editor keeps it and the decoder looks values up (2026-09-24). The PDF importer still flags them and keeps the states in the notes. |
+| BCD digit weights in the editor | `dataframe/editor.py` `build_occurrences()` rebuilds segments without `bcd_weight`, so a weighted BCD parameter edited in the dialog becomes plain nibble BCD and exports without weights. The weights survive import, decoding, export and the repository. |
+| Decimals in the Parameters page | `decimals` is imported, shown, edited and exported but not yet used to round displayed values. |
 | Superframes | Recognised and rejected. |
 | Repository in the GUI | Save/load of dataframe documents is API-only. |
 | ADB parameter record layout | Verified against two real AFDA files (2026-09-24, `docs/06-adb-format.md`). Still open: the meaning of subframe selectors other than `1234` and the significance order of concatenated parts — settled by the probe in `examples/afda_probe/`. |

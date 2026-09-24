@@ -43,14 +43,17 @@ Three principles run through the code base:
 The application is written in Python 3.12 with Qt for Python [13], PyMuPDF
 [12], NumPy [14], pySerial [15] and, for scanned documents, ONNX Runtime
 [11] running the PP-OCRv3 recognizer [8][9] through RapidOCR [10]. The
-stream emulator firmware for the STM32F103 [18] is freestanding C.
+stream emulator firmware for the STM32F103 [18] is freestanding C,
+maintained outside this repository.
 
 ## Features
 
 **Dataframes**
 
-- Import and export of `.adb` dataframe files with lossless preservation of
-  fields whose meaning is unknown, so an imported file round-trips.
+- Import and export of `.adb` dataframe files in the AFDA record layout,
+  verified against real vendor files: an unchanged parameter is written
+  back byte for byte, fields whose meaning is unknown are preserved, and
+  edited or new parameters are generated in the same layout.
 - A dataframe editor: metadata, parameters, occurrences and segments, with
   the validator's verdict previewed before a change is committed.
 - Layered validation (structural, mapping, semantic) with overlaps,
@@ -69,9 +72,10 @@ stream emulator firmware for the STM32F103 [18] is freestanding C.
 
 **Decoding**
 
-- Signed and unsigned binary, BCD and discrete parameters with linear
-  conversion, multi-segment assembly and per-occurrence, per-subframe
-  samples.
+- Signed and unsigned binary, BCD (plain nibbles, or one weighted digit per
+  word part as AFDA files list them) and discrete parameters (two labels or
+  a state table) with linear conversion, multi-segment assembly and
+  per-occurrence, per-subframe samples.
 - Every value carries a trace: segments, extracted bits, assembled value,
   decoded decimal, conversion, status and message.
 - A closed-loop encoder: engineering values are encoded into frames and
@@ -121,7 +125,7 @@ stream emulator firmware for the STM32F103 [18] is freestanding C.
   interface whose selections and column widths hold still while values
   update.
 - Standalone builds with PyInstaller and a Windows MSI installer.
-- 219 automated tests, including offscreen tests that drive the real
+- 234 automated tests, including offscreen tests that drive the real
   widgets, and an OCR benchmark against known ground truth.
 
 ## Mockups
@@ -181,7 +185,7 @@ python3 -m venv .venv
 ```
 
 Press **▶ Start stream** to stream from the virtual device, or connect an
-STM32F103 running the firmware in `firmware/stm32f103_sim_a717/`. The Help
+STM32F103 running the SIM-A717 firmware (kept outside this repository). The Help
 tab (F1) is the user guide; the full documentation (installation, user
 guide, data model, decoding, file formats, PDF import, scanned-page
 processing, the SIM-A717 protocol, the live path, architecture,
@@ -192,8 +196,10 @@ Package layout: `arinc717_reader/domain` (models), `decoder` and `encoder`,
 `dataframe` (ADB codec, validator, editor, repository, `pdf_importer`),
 `sources` (frame and stream sources, `serial/` for SIM-A717), `streaming`
 (samples, time series, signal generators), `recording`, `state` and
-`services`, `ui` (PySide6 pages), plus `firmware/`, `packaging/`, `tools/`
-(OCR benchmark), `tests/`, `docs/` and `img/`.
+`services`, `ui` (PySide6 pages), plus `packaging/`, `tools/` (OCR
+benchmark, AFDA probe generator), `examples/` (demo dataframe, AFDA probe),
+`tests/`, `docs/` and `img/`. The STM32 firmware is kept outside the
+repository.
 
 ## References
 

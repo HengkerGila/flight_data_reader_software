@@ -38,7 +38,7 @@ def validate(dataframe: DataframeDefinition) -> list[ValidationIssue]:
                 )
             )
         if parameter.parameter_type == TYPE_DISCRETE and not (
-            parameter.true_state or parameter.false_state
+            parameter.true_state or parameter.false_state or parameter.states
         ):
             issues.append(
                 ValidationIssue(

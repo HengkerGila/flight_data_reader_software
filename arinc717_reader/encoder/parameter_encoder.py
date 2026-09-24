@@ -8,6 +8,8 @@ what makes closed-loop validation meaningful.
 
 from __future__ import annotations
 
+import math
+
 from ..domain.frame import Arinc717Frame
 from ..domain.parameter import (
     TYPE_ANALOG_SIGNED,
@@ -108,11 +110,18 @@ class ParameterEncoder:
             )
         widths = [s.width for s in segments]
         total_width = sum(widths)
-        pattern = self._value_to_pattern(parameter, value, total_width)
-        try:
-            parts = split_segments(pattern, widths)
-        except AssemblyError as exc:
-            raise EncodeError(f"{parameter.mnemonic}: {exc}") from exc
+        weights = [s.bcd_weight for s in segments]
+        if parameter.parameter_type == TYPE_BCD and all(w is not None for w in weights):
+            parts = self._weighted_bcd_parts(parameter, value, segments)
+            pattern = 0
+            for part, width in zip(parts, widths):
+                pattern = (pattern << width) | part
+        else:
+            pattern = self._value_to_pattern(parameter, value, total_width)
+            try:
+                parts = split_segments(pattern, widths)
+            except AssemblyError as exc:
+                raise EncodeError(f"{parameter.mnemonic}: {exc}") from exc
         for segment, part in zip(segments, parts):
             try:
                 lo, _hi = normalize_bit_range(segment.lsb, segment.msb)
@@ -133,6 +142,48 @@ class ParameterEncoder:
                     subframe, segment.word, (old & ~mask) | (part << (lo - 1))
                 )
         return pattern
+
+    def _weighted_bcd_parts(
+        self,
+        parameter: ParameterDefinition,
+        value: int | float | str | bool,
+        segments,
+    ) -> list[int]:
+        """Inverse of the decoder's weighted BCD: one digit per segment.
+
+        The weights must form a decade ladder (…, 10, 1, 0.1, …) in segment
+        order; anything else has no unique digit split and is refused.
+        """
+        rule = parameter.conversion
+        weights = [float(s.bcd_weight) for s in segments]
+        base = min(weights)
+        if base <= 0:
+            raise EncodeError(f"{parameter.mnemonic}: BCD digit weights must be positive")
+        count = len(weights)
+        for position, weight in enumerate(weights):
+            if not math.isclose(weight, base * 10 ** (count - 1 - position), rel_tol=1e-9):
+                raise EncodeError(
+                    f"{parameter.mnemonic}: BCD digit weights {weights} are not a decade ladder"
+                )
+        try:
+            scaled = invert_linear(float(value), rule.resolution, rule.offset)
+        except (ConversionError, TypeError, ValueError) as exc:
+            raise EncodeError(f"{parameter.mnemonic}: {exc}") from exc
+        integer = round(scaled / base)
+        if integer < 0 or integer >= 10**count:
+            raise EncodeError(
+                f"{parameter.mnemonic}: {value} does not fit {count} BCD digit(s)"
+            )
+        parts: list[int] = []
+        for position, segment in enumerate(segments):
+            digit = (integer // 10 ** (count - 1 - position)) % 10
+            if digit >> segment.width:
+                raise EncodeError(
+                    f"{parameter.mnemonic}: digit {digit} does not fit segment "
+                    f"#{segment.sequence} ({segment.width} bit)"
+                )
+            parts.append(digit)
+        return parts
 
     def _value_to_pattern(
         self,

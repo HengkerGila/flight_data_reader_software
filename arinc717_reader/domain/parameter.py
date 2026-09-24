@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 # Canonical parameter types (design spec §6.4).
 TYPE_ANALOG_SIGNED = "analog_signed"
@@ -96,6 +97,28 @@ class ConversionRule:
     formula_type: str = "linear"
 
 
+def resolution_decimals(resolution: float, cap: int = 4) -> int:
+    """Display decimals implied by a resolution: 0.25 → 2, 0.0062 → 4, 1 → 0."""
+    number = abs(float(resolution))
+    if number == 0 or number.is_integer():
+        return 0
+    text = format(Decimal(repr(number)), "f").rstrip("0")
+    return min(len(text.partition(".")[2]), cap)
+
+
+@dataclass
+class DiscreteState:
+    """One row of a discrete state table: raw field value → label.
+
+    ``true_state``/``false_state`` on the parameter stay the two-state
+    shortcut every consumer understands; ``states`` carries the full table
+    (an AFDA record holds up to 32 entries) for multi-bit discretes.
+    """
+
+    value: int
+    label: str = ""
+
+
 @dataclass
 class ParameterSegment:
     """One bit field inside one word (design spec §6.7).
@@ -112,6 +135,9 @@ class ParameterSegment:
     lsb: int
     msb: int
     source_raw: dict | None = None
+    # AFDA-style BCD: one segment per digit, value = Σ digit × weight.
+    # ``None`` means plain nibble BCD of the assembled field (spec §17).
+    bcd_weight: float | None = None
 
     @property
     def bit_range(self) -> tuple[int, int]:
@@ -157,11 +183,43 @@ class ParameterDefinition:
 
     conversion: ConversionRule = field(default_factory=ConversionRule)
 
+    # Display precision (AFDA column 8); ``None`` = derive from the resolution.
+    decimals: int | None = None
+
     true_state: str | None = None
     false_state: str | None = None
+    # Full state table for discretes with more than two states; empty when
+    # ``true_state``/``false_state`` say it all.
+    states: list[DiscreteState] = field(default_factory=list)
 
     occurrences: list[ParameterOccurrence] = field(default_factory=list)
 
     notes: str | None = None
 
     provenance: ParameterProvenance | None = None
+
+    def state_label(self, value: int) -> str | None:
+        """Label of ``value`` in the state table, or ``None`` when absent."""
+        for state in self.states:
+            if state.value == value:
+                return state.label
+        return None
+
+    def effective_decimals(self) -> int:
+        """Explicit ``decimals``, else what the resolution implies."""
+        if self.decimals is not None:
+            return self.decimals
+        if self.parameter_type == TYPE_DISCRETE:
+            return 0
+        return resolution_decimals(self.conversion.resolution)
+
+    def effective_states(self) -> list[DiscreteState]:
+        """The state table, or the one ``false_state``/``true_state`` imply."""
+        if self.states:
+            return list(self.states)
+        states: list[DiscreteState] = []
+        if self.false_state is not None:
+            states.append(DiscreteState(0, self.false_state))
+        if self.true_state is not None:
+            states.append(DiscreteState(1, self.true_state))
+        return states

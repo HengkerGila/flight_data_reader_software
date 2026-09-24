@@ -2,20 +2,40 @@
 
 ``decode(existing.adb) == decode(generated.adb)`` at the semantic level:
 settings, sync words, parameter identity/type/unit/conversion/states,
-occurrences, segments, subframes, words, bits, and preserved unknown fields.
-Byte-for-byte equality is not required.
+occurrences, segments, subframes, words, bits, BCD digit weights and
+preserved unknown fields.  Byte-for-byte equality is not required here.
+
+``ignore`` names parameter attributes to leave out — the ADB format has no
+notes column, so an ADB round trip is compared with ``ignore=("notes",)``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from ..domain.dataframe import DataframeDefinition
+from ..domain.parameter import ParameterDefinition
 from .adb_codec.legacy import segment_legacy_flag
+
+_PARAMETER_ATTRIBUTES = (
+    "mnemonic",
+    "description",
+    "source_parameter_type",
+    "parameter_type",
+    "unit",
+    "minimum",
+    "maximum",
+    "true_state",
+    "false_state",
+    "notes",
+)
 
 
 def dataframe_differences(
-    a: DataframeDefinition, b: DataframeDefinition
+    a: DataframeDefinition, b: DataframeDefinition, ignore: Iterable[str] = ()
 ) -> list[str]:
     """Return semantic differences; an empty list means equivalent."""
+    ignored = set(ignore)
     diffs: list[str] = []
 
     if a.metadata.wps != b.metadata.wps:
@@ -38,22 +58,28 @@ def dataframe_differences(
         return diffs
 
     for pa, pb in zip(a.parameters, b.parameters):
-        label = pa.mnemonic
-        for attr in (
-            "mnemonic",
-            "description",
-            "source_parameter_type",
-            "parameter_type",
-            "unit",
-            "minimum",
-            "maximum",
-            "true_state",
-            "false_state",
-            "notes",
-        ):
-            va, vb = getattr(pa, attr), getattr(pb, attr)
-            if va != vb:
-                diffs.append(f"{label}: {attr}: {va!r} != {vb!r}")
+        diffs.extend(parameter_differences(pa, pb, ignore=ignored))
+    return diffs
+
+
+def parameter_differences(
+    pa: ParameterDefinition,
+    pb: ParameterDefinition,
+    ignore: Iterable[str] = (),
+    label: str | None = None,
+) -> list[str]:
+    """Semantic differences between two parameter definitions (ids excluded)."""
+    ignored = set(ignore)
+    label = label or pa.mnemonic
+    diffs: list[str] = []
+
+    for attr in _PARAMETER_ATTRIBUTES:
+        if attr in ignored:
+            continue
+        va, vb = getattr(pa, attr), getattr(pb, attr)
+        if va != vb:
+            diffs.append(f"{label}: {attr}: {va!r} != {vb!r}")
+    if "conversion" not in ignored:
         if pa.conversion.resolution != pb.conversion.resolution:
             diffs.append(
                 f"{label}: resolution: {pa.conversion.resolution} != "
@@ -63,43 +89,56 @@ def dataframe_differences(
             diffs.append(
                 f"{label}: offset: {pa.conversion.offset} != {pb.conversion.offset}"
             )
+    if "decimals" not in ignored and pa.effective_decimals() != pb.effective_decimals():
+        diffs.append(
+            f"{label}: decimals: {pa.effective_decimals()} != {pb.effective_decimals()}"
+        )
+    if "states" not in ignored:
+        sa = {s.value: s.label for s in pa.effective_states()}
+        sb = {s.value: s.label for s in pb.effective_states()}
+        if sa != sb:
+            diffs.append(f"{label}: states: {sa} != {sb}")
 
-        ta = pa.provenance.extra.get("trailing_fields", []) if pa.provenance else []
-        tb = pb.provenance.extra.get("trailing_fields", []) if pb.provenance else []
-        if list(ta) != list(tb):
-            diffs.append(f"{label}: trailing legacy fields: {ta} != {tb}")
+    ta = pa.provenance.extra.get("trailing_fields", []) if pa.provenance else []
+    tb = pb.provenance.extra.get("trailing_fields", []) if pb.provenance else []
+    if list(ta) != list(tb):
+        diffs.append(f"{label}: trailing legacy fields: {ta} != {tb}")
 
-        if len(pa.occurrences) != len(pb.occurrences):
+    if len(pa.occurrences) != len(pb.occurrences):
+        diffs.append(
+            f"{label}: occurrence count: {len(pa.occurrences)} != "
+            f"{len(pb.occurrences)}"
+        )
+        return diffs
+    for oa, ob in zip(pa.occurrences, pb.occurrences):
+        if oa.index != ob.index:
+            diffs.append(f"{label}: occurrence index {oa.index} != {ob.index}")
+        if len(oa.segments) != len(ob.segments):
             diffs.append(
-                f"{label}: occurrence count: {len(pa.occurrences)} != "
-                f"{len(pb.occurrences)}"
+                f"{label} occ {oa.index}: segment count "
+                f"{len(oa.segments)} != {len(ob.segments)}"
             )
             continue
-        for oa, ob in zip(pa.occurrences, pb.occurrences):
-            if oa.index != ob.index:
-                diffs.append(f"{label}: occurrence index {oa.index} != {ob.index}")
-            if len(oa.segments) != len(ob.segments):
+        for sa, sb in zip(oa.segments, ob.segments):
+            seg_label = f"{label} occ {oa.index} seg {sa.sequence}"
+            if sa.sequence != sb.sequence:
+                diffs.append(f"{seg_label}: sequence {sa.sequence} != {sb.sequence}")
+            if tuple(sa.subframes) != tuple(sb.subframes):
                 diffs.append(
-                    f"{label} occ {oa.index}: segment count "
-                    f"{len(oa.segments)} != {len(ob.segments)}"
+                    f"{seg_label}: subframes {sa.subframes} != {sb.subframes}"
                 )
-                continue
-            for sa, sb in zip(oa.segments, ob.segments):
-                seg_label = f"{label} occ {oa.index} seg {sa.sequence}"
-                if sa.sequence != sb.sequence:
-                    diffs.append(f"{seg_label}: sequence {sa.sequence} != {sb.sequence}")
-                if tuple(sa.subframes) != tuple(sb.subframes):
-                    diffs.append(
-                        f"{seg_label}: subframes {sa.subframes} != {sb.subframes}"
-                    )
-                if (sa.word, sa.lsb, sa.msb) != (sb.word, sb.lsb, sb.msb):
-                    diffs.append(
-                        f"{seg_label}: word/lsb/msb "
-                        f"({sa.word},{sa.lsb},{sa.msb}) != "
-                        f"({sb.word},{sb.lsb},{sb.msb})"
-                    )
-                fa = segment_legacy_flag(sa.source_raw)
-                fb = segment_legacy_flag(sb.source_raw)
-                if fa != fb:
-                    diffs.append(f"{seg_label}: legacy flag {fa!r} != {fb!r}")
+            if (sa.word, sa.lsb, sa.msb) != (sb.word, sb.lsb, sb.msb):
+                diffs.append(
+                    f"{seg_label}: word/lsb/msb "
+                    f"({sa.word},{sa.lsb},{sa.msb}) != "
+                    f"({sb.word},{sb.lsb},{sb.msb})"
+                )
+            if sa.bcd_weight != sb.bcd_weight:
+                diffs.append(
+                    f"{seg_label}: BCD weight {sa.bcd_weight} != {sb.bcd_weight}"
+                )
+            fa = segment_legacy_flag(sa.source_raw)
+            fb = segment_legacy_flag(sb.source_raw)
+            if fa != fb:
+                diffs.append(f"{seg_label}: legacy flag {fa!r} != {fb!r}")
     return diffs

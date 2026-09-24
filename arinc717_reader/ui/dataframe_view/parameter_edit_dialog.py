@@ -47,6 +47,7 @@ from ...domain.frame import WORD_BITS
 from ...domain.parameter import (
     TYPE_UNKNOWN,
     ConversionRule,
+    DiscreteState,
     ParameterDefinition,
     normalize_source_type,
 )
@@ -151,6 +152,13 @@ class ParameterEditDialog(QDialog):
         range_row.addWidget(QLabel("max"))
         range_row.addWidget(self._maximum)
         form.addRow("Range:", range_row)
+
+        self._decimals = QLineEdit(
+            str(p.decimals) if p and p.decimals is not None else ""
+        )
+        self._decimals.setFont(monospace_font())
+        self._decimals.setPlaceholderText("auto (from the resolution)")
+        form.addRow("Decimals:", self._decimals)
 
         state_row = QHBoxLayout()
         self._true_state = QLineEdit(p.true_state or "" if p else "")
@@ -323,6 +331,8 @@ class ParameterEditDialog(QDialog):
             raise ValueError("mnemonic is required")
         source_type = self._source_type.currentText().strip() or None
         original = self._original
+        true_state = self._true_state.text().strip() or None
+        false_state = self._false_state.text().strip() or None
         candidate = ParameterDefinition(
             id=original.id if original else "",
             mnemonic=mnemonic,
@@ -336,8 +346,10 @@ class ParameterEditDialog(QDialog):
                 resolution=_float_field(self._resolution.text(), "resolution"),
                 offset=_float_field(self._offset.text(), "offset"),
             ),
-            true_state=self._true_state.text().strip() or None,
-            false_state=self._false_state.text().strip() or None,
+            decimals=_opt_int(self._decimals.text(), "decimals"),
+            true_state=true_state,
+            false_state=false_state,
+            states=_carry_states(original, true_state, false_state),
             occurrences=build_occurrences(self._rows(), previous=original),
             notes=self._notes.text().strip() or None,
             provenance=copy.deepcopy(original.provenance) if original else None,
@@ -415,3 +427,31 @@ def _opt_float(text: str, label: str) -> float | None:
     if not text.strip():
         return None
     return _float_field(text, label)
+
+
+def _opt_int(text: str, label: str) -> int | None:
+    if not text.strip():
+        return None
+    return _int_field(text, label)
+
+
+def _carry_states(
+    original: ParameterDefinition | None,
+    true_state: str | None,
+    false_state: str | None,
+) -> list[DiscreteState]:
+    """Keep a multi-state table across an edit; the two edited labels update
+    their rows (0 and 1).  A parameter without a table gets none — the
+    two labels alone describe it."""
+    if original is None or not original.states:
+        return []
+    states = copy.deepcopy(original.states)
+    for value, label in ((1, true_state), (0, false_state)):
+        for state in states:
+            if state.value == value:
+                state.label = label or ""
+                break
+        else:
+            if label:
+                states.append(DiscreteState(value, label))
+    return states

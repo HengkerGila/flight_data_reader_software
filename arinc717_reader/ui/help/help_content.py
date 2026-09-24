@@ -230,7 +230,7 @@ recording or replay is running.</p>
                 ["File → New Dataframe…", "Creates an empty dataframe (name, WPS, sync words) to author by hand on the Dataframe page."],
                 ["File → Open ADB…", "Loads a <code>.adb</code> dataframe file. Parse errors are shown with the record-level explanation."],
                 ["File → Import PDF…", "Runs the PDF dataframe importer with a progress dialog, then opens the review dialog."],
-                ["File → Export ADB…", "Writes the current dataframe as <code>.adb</code> and clears the unexported marker."],
+                ["File → Export ADB…", "Writes the current dataframe as <code>.adb</code> in the AFDA layout and clears the unexported marker. Notes have no column in that format and are not exported."],
                 ["File → Load Frame… / Save Frame…", "Reads or writes the current frame as a JSON file (the last frame of a paused stream can be saved)."],
                 ["File → Record Session…", "Starts writing a <code>.a717session</code> file with every received subframe, every decoded sample and every stream event. Needs a connected device or a running replay."],
                 ["File → Stop Recording", "Closes the session file; the status bar names it."],
@@ -415,7 +415,7 @@ record, PDF page and cell, or manual entry).</p>
                 ["▲ / ▼", "Moves the selected parameter in the list (the order is kept in the export)."],
                 ["Search", "Filters the tree by mnemonic or description."],
                 ["Validate Dataframe", "Runs the structural, mapping and semantic checks and shows the issues (also listed on the Import page)."],
-                ["Export ADB…", "Writes the dataframe as <code>.adb</code>. Unknown fields read from an imported ADB are preserved."],
+                ["Export ADB…", "Writes the dataframe as <code>.adb</code> in the AFDA layout (frame-absolute word numbers, state tables, BCD digit weights). A parameter that is unchanged since import is written back exactly as it was read; unknown fields are preserved."],
             ],
         )
         + """

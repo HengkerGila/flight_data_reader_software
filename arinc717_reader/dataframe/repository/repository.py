@@ -20,6 +20,7 @@ from ...domain.parameter import (
     ParameterProvenance,
     ParameterSegment,
 )
+from ...domain.parameter import DiscreteState
 from ..adb_codec.mappings import decode_subframe_selector, encode_subframe_selector
 from ..validator import ValidationIssue
 from .schema import init_schema
@@ -84,8 +85,8 @@ class DataframeRepository:
                 (document_id, param_key, mnemonic, description,
                  source_parameter_type, parameter_type, unit, minimum, maximum,
                  resolution, conversion_offset, formula_type,
-                 true_state, false_state, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 true_state, false_state, notes, decimals, states)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 document_id,
@@ -103,6 +104,8 @@ class DataframeRepository:
                 p.true_state,
                 p.false_state,
                 p.notes,
+                p.decimals,
+                json.dumps([[s.value, s.label] for s in p.states]) if p.states else None,
             ),
         )
         parameter_row_id = cursor.lastrowid
@@ -122,8 +125,8 @@ class DataframeRepository:
                     """
                     INSERT INTO parameter_segments
                         (occurrence_id, sequence, subframe_selector_raw,
-                         word, lsb, msb, legacy_flag)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                         word, lsb, msb, legacy_flag, bcd_weight)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         occurrence_row_id,
@@ -133,6 +136,7 @@ class DataframeRepository:
                         segment.lsb,
                         segment.msb,
                         source_raw.get("legacy_flag"),
+                        segment.bcd_weight,
                     ),
                 )
         if p.provenance:
@@ -259,6 +263,7 @@ class DataframeRepository:
                         word=seg_row["word"],
                         lsb=seg_row["lsb"],
                         msb=seg_row["msb"],
+                        bcd_weight=seg_row["bcd_weight"],
                         source_raw={
                             "subframe_selector_raw": seg_row["subframe_selector_raw"],
                             "legacy_flag": seg_row["legacy_flag"] or "",
@@ -292,8 +297,15 @@ class DataframeRepository:
                 offset=row["conversion_offset"],
                 formula_type=row["formula_type"],
             ),
+            decimals=row["decimals"],
             true_state=row["true_state"],
             false_state=row["false_state"],
+            states=[
+                DiscreteState(int(value), label)
+                for value, label in json.loads(row["states"])
+            ]
+            if row["states"]
+            else [],
             occurrences=occurrences,
             notes=row["notes"],
             provenance=ParameterProvenance(

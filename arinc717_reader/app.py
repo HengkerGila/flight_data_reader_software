@@ -167,7 +167,7 @@ def selftest(argv: list[str]) -> int:
 
         original = build_demo_dataframe()
         parsed = parse_adb_text(dataframe_to_adb_text(original), source_filename="demo.adb")
-        diffs = dataframe_differences(original, parsed)
+        diffs = dataframe_differences(original, parsed, ignore=("notes",))
         assert not diffs, diffs
         return f"{len(parsed.parameters)} parameters"
 

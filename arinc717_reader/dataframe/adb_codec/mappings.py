@@ -1,12 +1,19 @@
-"""ADB record layout constants and the subframe selector codec (§34–§36).
+"""ADB record layout and the subframe selector codec (design spec §34–§36).
 
-PROVISIONAL LAYOUT — the parameter record layout below is this project's
-canonical serialization, designed around what reverse engineering of the
-Aering/AFDA-style files indicates (positional fields; mapping information
-holding subframe selector, word, lsb, msb and a legacy flag; occurrences with
-segments).  When a real supplied `.adb` is fully verified, adjust the
-constants and consuming code HERE — nothing else in the codebase depends on
-field positions.  Unknown fields are preserved losslessly either way.
+The layout below was verified on 2026-09-24 against two real AFDA files: a
+vendor-made 442-parameter NC212i dataframe and a hand-made 37-parameter
+one.  Both share one identical header and 238-field parameter records.
+`docs/06-adb-format.md` holds the full field table and the evidence.
+
+What the two files could not settle is marked PROVISIONAL and is one
+constant to flip after the probe file (`tools/make_afda_probe.py`) has been
+opened in AFDA:
+
+* ``PARTS_ORDER`` — the significance order in which the parts of a
+  concatenated (multi-word) parameter are listed.  The vendor file lists BCD
+  digit weights least significant first, so LS-first is the working
+  assumption for analog parts as well.
+* the meaning of a subframe selector other than ``1234`` (see the parser).
 """
 
 from __future__ import annotations
@@ -14,50 +21,107 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ...domain.frame import SUBFRAME_COUNT
+from ...domain.parameter import (
+    TYPE_ANALOG_SIGNED,
+    TYPE_ANALOG_UNSIGNED,
+    TYPE_BCD,
+    TYPE_DISCRETE,
+)
+
+# Text encoding of the files: the Windows code page (the vendor file carries
+# a cp1252 right single quote).  Plain ASCII files are unaffected.
+ADB_ENCODING = "cp1252"
 
 # ---------------------------------------------------------------------------
-# Settings record, e.g.:  Setting,1,57,9,12,256,0,583,1464,2631,3512
-# Known / highly-supported fields: index 5 = WPS, indexes 7..10 = sync words.
-# The remaining header fields have unknown semantics; they are preserved
-# verbatim (never given invented meanings, design spec §34).
+# Settings record:  Setting,1,64,1,12,256,0,583,1464,2631,3512
+#   index 2      words per subframe (= words per second, WPS)
+#   index 4      bits per word (12)
+#   index 5      words per frame (SUBFRAME_COUNT × WPS)
+#   index 7..10  sync words SF1..SF4 in decimal (583 = 1107 octal, …)
+#   index 1, 3, 6  unknown semantics — preserved verbatim, never invented
 # ---------------------------------------------------------------------------
 SETTING_TAG = "Setting"
-SETTING_WPS_INDEX = 5
+SETTING_WPS_INDEX = 2
+SETTING_BITS_INDEX = 4
+SETTING_WORDS_PER_FRAME_INDEX = 5
 SETTING_SYNC_WORD_INDEXES = (7, 8, 9, 10)
 SETTING_MIN_FIELDS = 11
-# Template mirrors the observed example header; unknown-semantics fields are
-# copied verbatim when writing a dataframe that has no preserved raw header.
-SETTING_TEMPLATE_UNKNOWN_FIELDS = ("1", "57", "9", "12")  # indexes 1..4
-SETTING_TEMPLATE_FIELD_6 = "0"
+SETTING_UNKNOWN_INDEXES = (1, 3, 6)
+# Values of the unknown fields copied from the observed header, used when a
+# dataframe that never came from an ADB is written.
+SETTING_TEMPLATE_UNKNOWN = {1: "1", 3: "1", 6: "0"}
+SETTING_BITS_PER_WORD = "12"
 
 # ---------------------------------------------------------------------------
-# Parameter record: fixed positional head, then occurrence/segment groups,
-# then optional trailing fields (preserved verbatim).
-#
-#   0 mnemonic          6 minimum
-#   1 description       7 maximum
-#   2 source type       8 true state
-#   3 unit              9 false state
-#   4 resolution       10 notes
-#   5 offset           11 occurrence count
-#
-#   then per occurrence:  segment count,
-#     then per segment:   subframe selector, word, lsb, msb, legacy flag
+# Parameter record: exactly 238 positional fields.
 # ---------------------------------------------------------------------------
-PARAM_MNEMONIC = 0
+PARAM_NAME = 0
 PARAM_DESCRIPTION = 1
-PARAM_SOURCE_TYPE = 2
+PARAM_TYPE = 2  # "Signed Analog" | "Unsigned Analog" | "Discrete" | "BCD"
 PARAM_UNIT = 3
-PARAM_RESOLUTION = 4
-PARAM_OFFSET = 5
-PARAM_MINIMUM = 6
-PARAM_MAXIMUM = 7
-PARAM_TRUE_STATE = 8
-PARAM_FALSE_STATE = 9
-PARAM_NOTES = 10
-PARAM_OCCURRENCE_COUNT = 11
-PARAM_FIXED_FIELD_COUNT = 12
-SEGMENT_FIELD_COUNT = 5  # selector, word, lsb, msb, legacy flag
+PARAM_MINIMUM = 4
+PARAM_MAXIMUM = 5
+PARAM_SCALE = 6  # resolution, engineering units per count
+PARAM_OFFSET = 7
+PARAM_DECIMALS = 8  # display precision
+PARAM_CONVERSION_KIND = 9  # "-" analog/BCD, "Discrete" = state table follows, "" none
+PARAM_STATE_VALUES_START = 10  # 32 slots: discrete state values, or BCD digit weights
+PARAM_STATE_LABELS_START = 42  # 32 slots: discrete state labels
+STATE_SLOTS = 32
+PARAM_SAMPLE_COUNT = 74  # samples per frame (= locations ÷ parts)
+PARAM_PART_COUNT = 75  # word parts per sample (concatenation)
+PARAM_LOCATIONS_START = 76
+LOCATION_SLOTS = 32
+LOCATION_FIELD_COUNT = 5  # subframe selector, word, lsb, msb, spare (blank so far)
+PARAM_RECORD_LENGTH = (
+    PARAM_LOCATIONS_START + LOCATION_SLOTS * LOCATION_FIELD_COUNT + 2
+)  # 238: two blank fields close every record
+
+CONVERSION_KIND_ANALOG = "-"
+CONVERSION_KIND_DISCRETE = "Discrete"
+
+# A location's word is numbered 1..SUBFRAME_COUNT×WPS over the whole frame
+# ("frame-absolute"); the selector of such a location is always this text.
+SELECTOR_ALL = "1234"
+
+PARTS_ORDER_LS_FIRST = "ls_first"
+PARTS_ORDER_MS_FIRST = "ms_first"
+PARTS_ORDER = PARTS_ORDER_LS_FIRST  # PROVISIONAL — see the module docstring
+
+# Type text AFDA understands, keyed by canonical type.
+AFDA_TYPE_TEXT = {
+    TYPE_ANALOG_SIGNED: "Signed Analog",
+    TYPE_ANALOG_UNSIGNED: "Unsigned Analog",
+    TYPE_BCD: "BCD",
+    TYPE_DISCRETE: "Discrete",
+}
+_AFDA_TYPE_KEYS = {text.upper() for text in AFDA_TYPE_TEXT.values()}
+
+
+def afda_type_text(parameter_type: str, source_text: str | None) -> str:
+    """Type column text for export.
+
+    The source text when AFDA already knows it (any case/spacing), else
+    AFDA's word for the canonical type, else the source text as it is.
+    """
+    source = (source_text or "").strip()
+    if " ".join(source.upper().split()) in _AFDA_TYPE_KEYS:
+        return source
+    return AFDA_TYPE_TEXT.get(parameter_type, source)
+
+
+def absolute_word(subframe: int, word: int, wps: int) -> int:
+    """(subframe, word in subframe) → frame-absolute word number, 1-based."""
+    return (subframe - 1) * wps + word
+
+
+def split_absolute_word(absolute: int, wps: int) -> tuple[int, int]:
+    """Frame-absolute word number → (subframe, word in subframe), 1-based.
+
+    The subframe exceeds ``SUBFRAME_COUNT`` for out-of-frame input; callers
+    check.
+    """
+    return (absolute - 1) // wps + 1, (absolute - 1) % wps + 1
 
 
 class SubframeSelectorError(ValueError):
@@ -65,13 +129,12 @@ class SubframeSelectorError(ValueError):
 
 
 def decode_subframe_selector(text: str) -> tuple[int, ...]:
-    """Decode an ADB subframe selector (design spec §36).
+    """Decode a subframe selector (design spec §36).
 
     ``"1"`` → (1,)   ``"13"`` → (1, 3)   ``"1234"`` → (1, 2, 3, 4)
 
-    ``"0"`` is accepted as "recorded in every subframe" → (1, 2, 3, 4); this
-    is the common FDR convention but is provisional until verified against
-    real files.
+    ``"0"`` is accepted as "recorded in every subframe" → (1, 2, 3, 4), the
+    convention of PDF dataframe documents and of the mapping editor.
     """
     cleaned = text.strip()
     if cleaned == "0":

@@ -44,6 +44,8 @@ SCHEMA_STATEMENTS = (
         true_state TEXT,
         false_state TEXT,
         notes TEXT,
+        decimals INTEGER,
+        states TEXT,
         status TEXT NOT NULL DEFAULT 'IMPORTED'
     )
     """,
@@ -65,7 +67,8 @@ SCHEMA_STATEMENTS = (
         word INTEGER NOT NULL,
         lsb INTEGER NOT NULL,
         msb INTEGER NOT NULL,
-        legacy_flag TEXT
+        legacy_flag TEXT,
+        bcd_weight REAL
     )
     """,
     """
@@ -120,8 +123,20 @@ SCHEMA_STATEMENTS = (
 )
 
 
+# Columns added after the first schema; older database files get them here.
+_ADDED_COLUMNS = (
+    ("parameters", "decimals", "INTEGER"),
+    ("parameters", "states", "TEXT"),
+    ("parameter_segments", "bcd_weight", "REAL"),
+)
+
+
 def init_schema(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
     for statement in SCHEMA_STATEMENTS:
         connection.execute(statement)
+    for table, column, declaration in _ADDED_COLUMNS:
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
     connection.commit()

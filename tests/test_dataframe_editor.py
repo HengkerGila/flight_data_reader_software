@@ -244,9 +244,14 @@ def test_service_errors_are_explicit():
 
 
 def test_editing_imported_adb_keeps_unknown_fields():
+    record = [""] * 238
+    record[0:10] = ["PITCH ATT", "Pitch", "Signed Analog", "deg", "-90", "90", "0.176", "0", "2", "-"]
+    record[74:76] = ["1", "1"]
+    record[76:80] = ["1234", "4", "3", "12"]
     text = (
-        "Setting,1,57,9,12,256,0,583,1464,2631,3512,EXTRA1\r\n"
-        "PITCH ATT,Pitch,Signed Analog,deg,0.176,0,-90,90,,,,1,1,0,4,3,12,LEG7,TRAIL\r\n"
+        "Setting,1,256,1,12,1024,0,583,1464,2631,3512,EXTRA1\r\n"
+        + ",".join(record + ["TRAIL"])
+        + "\r\n"
     )
     ctx = build_context()
     ctx.dataframe_service.set_dataframe(parse_adb_text(text, source_filename="s.adb"))
@@ -259,7 +264,10 @@ def test_editing_imported_adb_keeps_unknown_fields():
         source_parameter_type="Signed Analog",
         parameter_type=TYPE_ANALOG_SIGNED,
         unit="deg",
+        minimum=-90,
+        maximum=90,
         conversion=ConversionRule(resolution=0.176),
+        decimals=original.decimals,
         occurrences=build_occurrences(segment_rows(original), previous=original),
         provenance=original.provenance,
     )
@@ -267,6 +275,8 @@ def test_editing_imported_adb_keeps_unknown_fields():
     ctx.dataframe_service.update_metadata(dataframe_name="renamed")
     out = dataframe_to_adb_text(ctx.dataframe_store.dataframe)
     lines = out.split("\r\n")
-    assert lines[0] == "Setting,1,57,9,12,256,0,583,1464,2631,3512,EXTRA1"
-    assert lines[1].endswith(",1,1,0,4,3,12,LEG7,TRAIL")  # selector "0", flag, trailing
-    assert ",Pitch (edited)," in lines[1]
+    assert lines[0] == "Setting,1,256,1,12,1024,0,583,1464,2631,3512,EXTRA1"
+    fields = lines[1].split(",")
+    assert fields[1] == "Pitch (edited)" and fields[8] == "2"
+    assert fields[76:80] == ["1234", "4", "3", "12"]
+    assert len(fields) == 239 and fields[-1] == "TRAIL"  # unknown trailing field kept

@@ -188,8 +188,17 @@ class ParameterDecoder:
 
         assembled, width = assemble_segments(parts)
         bits = format(assembled, f"0{width}b")
+        weights = [segment.bcd_weight for segment in segments]
+        weighted_parts = (
+            list(zip(parts, weights))
+            if parameter.parameter_type == TYPE_BCD
+            and weights
+            and all(w is not None for w in weights)
+            else None
+        )
         return self._interpret(
-            parameter, occurrence, subframe, traces, assembled, width, bits
+            parameter, occurrence, subframe, traces, assembled, width, bits,
+            weighted_parts=weighted_parts,
         )
 
     def _interpret(
@@ -201,6 +210,7 @@ class ParameterDecoder:
         assembled: int,
         width: int,
         bits: str,
+        weighted_parts: list[tuple[tuple[int, int], float]] | None = None,
     ) -> EngineeringValue:
         rule = parameter.conversion
         ptype = parameter.parameter_type
@@ -226,7 +236,11 @@ class ParameterDecoder:
                 message = f"unsupported formula_type {rule.formula_type!r}"
             elif ptype == TYPE_BCD:
                 try:
-                    decoded = decode_bcd(assembled, width)
+                    decoded = (
+                        _decode_weighted_bcd(weighted_parts)
+                        if weighted_parts
+                        else decode_bcd(assembled, width)
+                    )
                 except BcdError as exc:
                     status = STATUS_INVALID_BCD
                     message = str(exc)
@@ -245,7 +259,8 @@ class ParameterDecoder:
                 trace.offset = rule.offset
         elif ptype == TYPE_DISCRETE:
             decoded = assembled
-            engineering = decode_discrete(
+            label = parameter.state_label(assembled) if parameter.states else None
+            engineering = label or decode_discrete(
                 assembled, parameter.true_state, parameter.false_state
             )
             unit = None
@@ -312,3 +327,15 @@ def _error_value(
         status=status,
         trace=trace,
     )
+
+
+def _decode_weighted_bcd(
+    weighted_parts: list[tuple[tuple[int, int], float]],
+) -> int | float:
+    """AFDA-style BCD: every part is one digit field with its own decimal
+    weight (…, 10, 1, 0.1, …); the value is the weighted sum of the digits."""
+    total = 0.0
+    for (part_value, part_width), weight in weighted_parts:
+        total += decode_bcd(part_value, part_width) * weight
+    total = round(total, 10)
+    return int(total) if total.is_integer() else total

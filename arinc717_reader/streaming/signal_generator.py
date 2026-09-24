@@ -124,7 +124,11 @@ def representable_range(parameter: ParameterDefinition) -> tuple[float, float] |
     if ptype == TYPE_ANALOG_SIGNED:
         raw_lo, raw_hi = -(1 << (width - 1)), (1 << (width - 1)) - 1
     elif ptype == TYPE_BCD:
-        raw_lo, raw_hi = 0, _bcd_max_decimal(width)
+        weights = [s.bcd_weight for s in parameter.occurrences[0].segments]
+        if all(w is not None for w in weights):
+            raw_lo, raw_hi = 0, sum(9 * w for w in weights)  # every digit at 9
+        else:
+            raw_lo, raw_hi = 0, _bcd_max_decimal(width)
     else:
         raw_lo, raw_hi = 0, (1 << width) - 1
     if ptype == TYPE_RAW:

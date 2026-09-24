@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...dataframe.adb_codec.legacy import (
+    adb_warnings,
     legacy_setting_fields,
     segment_legacy_flag,
     trailing_legacy_fields,
@@ -276,8 +277,16 @@ class DataframePage(QWidget):
             f"Resolution     : {parameter.conversion.resolution:g}",
             f"Offset         : {parameter.conversion.offset:g}",
             f"Range          : {parameter.minimum} .. {parameter.maximum}",
+            f"Decimals       : "
+            f"{parameter.decimals if parameter.decimals is not None else 'auto'}",
             f"States         : 1={parameter.true_state or '—'}  "
-            f"0={parameter.false_state or '—'}",
+            f"0={parameter.false_state or '—'}"
+            + (
+                "  table: "
+                + ", ".join(f"{s.value}={s.label or '—'}" for s in parameter.states)
+                if parameter.states
+                else ""
+            ),
             f"Notes          : {parameter.notes or '—'}",
             "",
             "Mapping",
@@ -290,6 +299,11 @@ class DataframePage(QWidget):
                 lines.append(
                     f"    seg {segment.sequence}: SF {sf}  word {segment.word:03d}  "
                     f"bits {segment.msb}-{segment.lsb}"
+                    + (
+                        f"  BCD weight {segment.bcd_weight:g}"
+                        if segment.bcd_weight is not None
+                        else ""
+                    )
                     + (f"  legacy flag {flag!r}" if flag else "")
                 )
         lines.append("")
@@ -301,6 +315,8 @@ class DataframePage(QWidget):
             trailing = trailing_legacy_fields(parameter)
             if trailing:
                 lines.append(f"  trailing legacy fields: {trailing}")
+            for warning in adb_warnings(parameter):
+                lines.append(f"  import note   : {warning}")
             if p.raw_record:
                 lines.append(f"  raw record    : {','.join(p.raw_record)}")
         else:

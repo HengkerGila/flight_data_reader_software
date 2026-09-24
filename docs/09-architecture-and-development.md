@@ -202,6 +202,6 @@ normalised text a document uses rather than loosening the fuzzy threshold.
 | Enumerated multi-bit discretes | Flagged at import, states kept in notes; the model needs a state table and the decoder a lookup. |
 | Superframes | Recognised and rejected. |
 | Repository in the GUI | Save/load of dataframe documents is API-only. |
-| ADB parameter record layout | Provisional until a real Aering/AFDA file is verified. |
+| ADB parameter record layout | Verified against two real AFDA files (2026-09-24, `docs/06-adb-format.md`). Still open: the meaning of subframe selectors other than `1234` and the significance order of concatenated parts — settled by the probe in `examples/afda_probe/`. |
 | PDF importer | Column conventions verified against one real document; other vendors will need synonyms and possibly conventions. |
 | OCR | CPU-only RapidOCR with the bundled English recognizer and per-cell recognition; a page takes about 10 s at 200 dpi. `tools/ocr_bench.py` measures any change against known ground truth. No result cache between imports yet. |

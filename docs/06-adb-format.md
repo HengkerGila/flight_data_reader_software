@@ -1,25 +1,34 @@
 # 06 — The ADB format
 
-`.adb` files are the dataframe databases used by the Aering/AFDA family of
-flight-data tools. The application reads and writes them through
+`.adb` files are the dataframe databases of the AFDA flight-data software.
+The application reads and writes them through
 `arinc717_reader/dataframe/adb_codec/`.
+
+The layout below was verified on 2026-09-24 against two real AFDA files
+supplied by the user: a vendor-made NC212i dataframe (442 parameters) and a
+hand-made one (37 parameters). They share one identical header and one
+record shape. The earlier "provisional" layout of this project was a guess
+and has been replaced; files written with it are rejected with a clear
+error and must be re-exported.
 
 ## What an ADB file looks like
 
-- Plain ASCII text, CSV-like positional fields, CRLF line endings.
-- Quoted fields may contain commas and embedded line breaks.
-- Many fields are intentionally empty.
+- Plain text in the Windows code page (cp1252; the vendor file contains a
+  right single quote), CRLF line endings, no trailing blank line.
+- CSV: fields containing a line break are quoted; the vendor file has
+  descriptions with embedded line breaks.
 - The first record begins with `Setting`; every following record is one
-  parameter.
+  parameter and has **exactly 238 fields**, most of them empty.
 
 The parser uses Python's `csv` module (spec §33 forbids splitting on commas
-by hand), reads the file as bytes to compute its SHA-256, and decodes it as
-UTF-8 with replacement so a stray byte never aborts an import.
+by hand), reads bytes to compute the SHA-256, decodes UTF-8 when the bytes
+are valid UTF-8 (plain ASCII included) and cp1252 otherwise. The writer
+always emits cp1252.
 
 ```
-Setting,1,57,9,12,256,0,583,1464,2631,3512
-PITCH ATT #1,"Pitch attitude, captain side",Signed Analog,deg,0.176,0,-90,90,,,,2,1,1234,4,3,12,,1,1234,132,3,12,
-LDG GEAR DOWN,Landing gear lever position,Discrete,,1,0,,,DOWN,UP,,1,1,1234,13,1,1,
+Setting,1,64,1,12,256,0,583,1464,2631,3512
+ACC LATERAL,LATERAL ACCELEROMETER,Unsigned Analog,G,-1,1,0.002,-1.08,0,-,,,…,4,1,1234,4,1,12,,1234,68,1,12,,1234,132,1,12,,1234,196,1,12,,…
+GEAR LH,LH WOW,Discrete,Status,0,1,1,0,0,Discrete,0,1,,,…,ON AIR,ON GROUND,,,…,1,1,1234,248,3,3,,…
 ```
 
 ## The settings record
@@ -27,99 +36,138 @@ LDG GEAR DOWN,Landing gear lever position,Discrete,,1,0,,,DOWN,UP,,1,1,1234,13,1
 | Index | Example | Meaning |
 | --- | --- | --- |
 | 0 | `Setting` | Record tag. |
-| 1–4 | `1`, `57`, `9`, `12` | Unknown semantics; preserved verbatim as `legacy_setting_1` … `legacy_setting_4`. |
-| 5 | `256` | **WPS.** |
+| 1 | `1` | Unknown; preserved as `legacy_setting_1`. |
+| 2 | `64` | **Words per subframe = WPS.** |
+| 3 | `1` | Unknown; preserved as `legacy_setting_3`. |
+| 4 | `12` | Bits per word. |
+| 5 | `256` | Words per frame (4 × WPS). |
 | 6 | `0` | Unknown; preserved as `legacy_setting_6`. |
-| 7–10 | `583`, `1464`, `2631`, `3512` | **Sync words** SF1..SF4. |
+| 7–10 | `583`, `1464`, `2631`, `3512` | **Sync words** SF1..SF4 in decimal (octal 1107, 2670, 5107, 6670). |
 | 11+ | | Any further fields are preserved too. |
 
 The whole record is stored in `DataframeMetadata.adb_settings_raw`; the
-writer re-emits it with WPS and sync words overridden from the canonical
-metadata. A dataframe that never came from an ADB (manual, PDF, demo) is
-written with a template header (`Setting,1,57,9,12,<wps>,0,<sync…>`), the
-template values being copied from the observed example rather than invented.
+writer re-emits it with WPS, words per frame and sync words taken from the
+canonical metadata (words per frame only when the source file showed it to
+be 4 × WPS). A dataframe that never came from an ADB (manual, PDF, demo) is
+written with `Setting,1,<wps>,1,12,<4×wps>,0,<sync…>`, the unknown values
+copied from the observed header rather than invented.
 
-## Parameter records — provisional layout
-
-> The parameter record layout below is this project's serialisation of what
-> reverse engineering of the Aering/AFDA files indicates. Real supplied files
-> were not available when it was written. When one is, the constants in
-> `adb_codec/mappings.py` are the only place to adjust; nothing else depends
-> on field positions, and unknown fields are preserved either way.
+## Parameter records
 
 | Index | Field | Notes |
 | --- | --- | --- |
-| 0 | mnemonic | Empty mnemonics become `PARAM_<record number>`. |
-| 1 | description | |
-| 2 | source type | Kept verbatim; canonical type derived by `normalize_source_type`. |
-| 3 | unit | |
-| 4 | resolution | Default 1 when empty. |
-| 5 | offset | Default 0 when empty. |
-| 6 | minimum | Optional. |
-| 7 | maximum | Optional. |
-| 8 | true state | |
-| 9 | false state | |
-| 10 | notes | |
-| 11 | occurrence count | |
-| 12… | occurrence groups | For each occurrence: a **segment count**, then per segment five fields: **subframe selector, word, LSB, MSB, legacy flag**. |
-| after the groups | trailing fields | Anything left is preserved as `provenance.extra["trailing_fields"]`. |
+| 0 | name | Empty names become `PARAM_<record number>`. |
+| 1 | description | May contain line breaks (then quoted). |
+| 2 | type | `Signed Analog`, `Unsigned Analog`, `Discrete`, `BCD`. Kept verbatim; canonical type via `normalize_source_type`. |
+| 3 | unit | Often empty. |
+| 4 | minimum | |
+| 5 | maximum | |
+| 6 | scale | Resolution, engineering units per count. Default 1 when empty. |
+| 7 | offset | Default 0 when empty. |
+| 8 | decimals | Display precision. |
+| 9 | conversion kind | `-` for analog and BCD, `Discrete` when a state table follows, empty otherwise. |
+| 10–41 | state values / BCD weights | 32 slots. Discrete: the raw value of each state. BCD: one decimal weight per part (`1,10` or `0.01,0.1,1,10`). |
+| 42–73 | state labels | 32 slots, parallel to the values (`ON AIR`, `ON GROUND`). |
+| 74 | samples per frame | Number of samples = locations ÷ parts. |
+| 75 | parts per sample | 1, or the number of word parts of a concatenated value. |
+| 76–235 | 32 location slots | Each slot is five fields: **subframe selector, word, lsb, msb, spare** (the spare has been blank in every file seen; it is kept as the segment's `legacy_flag`). |
+| 236–237 | | Always blank. |
+| 238+ | trailing fields | Anything beyond 238 is preserved as `provenance.extra["trailing_fields"]`. |
 
-Each segment keeps its raw selector text and its legacy flag in
-`segment.source_raw` (`subframe_selector_raw`, `legacy_flag`). A parse error
-names the record and the problem (`record 3: PITCH: invalid word 'x'`).
+Bit numbers are 1..12 with bit 1 the LSB, as in the rest of the
+application.
 
-## The subframe selector
+### Locations
 
-Selectors are strings of subframe digits (spec §36), decoded and encoded by
-one codec in `adb_codec/mappings.py`:
+Every sample of a parameter is listed explicitly: a 4 Hz parameter in a
+64 wps frame has four locations (words 4, 68, 132, 196), an 8 Hz one eight.
+Word numbers are **frame-absolute**, 1..4×WPS, and such locations carry the
+selector `1234`; the subframe follows from the word (`248` = SF4 word 56).
+The vendor's own editor writes nothing else, and the user's hand-made file
+uses only this form.
 
-| Selector | Subframes |
-| --- | --- |
-| `1` | (1,) |
-| `13` | (1, 3) |
-| `24` | (2, 4) |
-| `1234` | (1, 2, 3, 4) |
-| `0` | (1, 2, 3, 4) — the common "every subframe" convention, provisional until verified |
+The parser folds locations into the canonical model: samples of the same
+word bits in different subframes become one segment with a multi-subframe
+tuple; different words become separate occurrences; the parts of a
+concatenated value become the segments of one occurrence. The writer does
+the reverse, always in the `1234` + absolute form.
 
-Digits outside 1–4 or non-digit text raise `SubframeSelectorError`. The
-writer reuses the original selector text of an unchanged segment (so `0`
-stays `0`) and regenerates it from the subframe tuple only after an edit that
-changed the subframes.
+A minority of vendor-file locations use a single subframe digit or a pair
+(`4,19` for the year, `13,204` for TAT). The parser reads a word inside one
+subframe (≤ WPS) as relative to the subframes the selector names, and a
+larger word as frame-absolute with the selector ignored and a note in
+`provenance.extra["adb_warnings"]`. See "Open questions".
 
-## Losslessness and the round trip
+### Concatenated values and BCD
 
-The acceptance target of spec §37 is that decoding an exported file gives the
-same dataframe as decoding the original, at the semantic level:
+Column 75 > 1 means each sample spans that many word parts, listed one
+after the other. For BCD the vendor file lists the digit weights least
+significant first (`1,10`; `0.01,0.1,1,10`), so the codec assumes parts
+are listed least significant first for analog values too
+(`mappings.PARTS_ORDER`). Sequence 1 of a canonical occurrence is the most
+significant part (spec §13), so the parser reverses the file order and the
+writer restores it.
 
-```
-existing.adb → parse → DataframeDefinition → write → generated.adb → parse
-dataframe_differences(first, second) == []
-```
+BCD digit weights are stored per segment (`ParameterSegment.bcd_weight`).
+The decoder then computes Σ digit × weight instead of treating the
+assembled field as plain nibbles, and the encoder splits a value into
+digits by the same weights.
 
-What survives: settings (including unknown header fields), sync words, every
-parameter's name, description, source type, unit, conversion, range, states
-and notes, the occurrence and segment structure, subframes, words, bits,
-segment legacy flags and trailing legacy fields. Byte-for-byte equality is
-not promised (field formatting may differ), and it is not needed.
+### Discrete states
 
-The writer emits CRLF-terminated CSV and formats numbers with Python's `g`
-format, so `0.176` stays `0.176` and `1.0` becomes `1`.
+`true_state` / `false_state` remain the two-state shortcut (labels of values
+1 and 0). The full table lives in `ParameterDefinition.states`, so a
+multi-bit discrete with values 0..3 keeps its four labels and decodes to
+them. The writer emits the table when present and otherwise derives
+`0=false_state, 1=true_state`.
+
+### What the format cannot hold
+
+- **Notes** have no column and are not exported.
+- At most **32 locations** per parameter (8 Hz at 4 subframes); more
+  raises `AdbWriteError`.
+- At most 32 discrete states.
+- Occurrences of different part counts within one parameter cannot share a
+  parts count; the writer then lists every segment as a separate sample.
+
+## Round trip
+
+An imported parameter that is still semantically identical to its raw
+record is written back as that record, byte for byte, so
+`write(parse(file)) == file` for both real samples. Anything edited or
+created in the application is generated from the canonical model with
+plain decimal numbers (`0.00017166137`, never `1.7166137E-4`), AFDA's type
+vocabulary (`BNR` becomes `Unsigned Analog`), `1234` + absolute words, the
+state table and BCD weights. The semantic round trip
+`dataframe_differences(a, parse(write(a)), ignore=("notes",)) == []` holds
+for the demo dataframe and for the real files with provenance stripped.
+
+## Open questions (to settle in AFDA itself)
+
+`tools/make_afda_probe.py` writes `examples/afda_probe/afda_probe_64wps.adb`,
+a small database in this layout with parameters named after what they test.
+Opening it in AFDA answers:
+
+1. **Selector semantics.** Does AFDA place `2,6` at SF2 word 6 (relative),
+   `3,70` at SF2 word 6 (absolute, selector ignored) or somewhere else, and
+   does `13,6` yield two samples? The parser's rule above is the working
+   assumption.
+2. **Part order.** Is the first listed part of a concatenated value the
+   least or the most significant? Flip `PARTS_ORDER` if AFDA shows MS-first.
+3. **Decimals and states.** Whether column 8 drives the display precision
+   and whether a four-state table is accepted.
+4. **Tolerance.** Whether empty min/max or an unknown type text is accepted
+   (the probe avoids both).
+
+`examples/afda_probe/README.md` is the checklist. If AFDA can save the
+database, the saved file shows how AFDA itself writes those rows, which is
+the best evidence of all.
 
 ## Legacy field helpers
 
-`adb_codec/legacy.py` exposes the preserved unknown fields without inventing
-meanings: `legacy_setting_fields(metadata)` returns the unknown header fields
-keyed `legacy_setting_<index>`, `trailing_legacy_fields(parameter)` the
-trailing record fields, and `segment_legacy_flag(source_raw)` the per-segment
-flag. The Dataframe page shows them in the details panel.
-
-## Adapting to a real file
-
-1. Parse the file with `parse_adb_file`; a clear `AdbParseError` tells you
-   which record and field disagree with the layout.
-2. Adjust the index constants and, if the group structure differs, the
-   segment group size in `adb_codec/mappings.py`.
-3. Run `tests/test_adb_roundtrip.py` against the real file and add it as a
-   fixture: the semantic round trip must stay empty.
-4. Keep preserving anything you do not understand; `legacy_*` names exist for
-   exactly that.
+`adb_codec/legacy.py` exposes preserved unknown fields without inventing
+meanings: `legacy_setting_fields(metadata)` for the unknown header fields,
+`trailing_legacy_fields(parameter)` for fields beyond 238,
+`segment_legacy_flag(source_raw)` for a location's spare field and
+`adb_warnings(parameter)` for what the parser guessed or ignored. The
+Dataframe page shows all of them in the details panel.

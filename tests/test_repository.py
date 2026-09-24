@@ -3,7 +3,7 @@ from arinc717_reader.dataframe.compare import dataframe_differences
 from arinc717_reader.dataframe.repository import DataframeRepository
 from arinc717_reader.dataframe.validator import ValidationIssue, validate_dataframe
 
-from .test_adb_roundtrip import SAMPLE_ADB
+from .test_adb_roundtrip import FIXTURE, HEADER, afda_row
 
 
 def test_demo_save_load_roundtrip(demo_dataframe):
@@ -17,7 +17,10 @@ def test_demo_save_load_roundtrip(demo_dataframe):
 
 
 def test_adb_parsed_save_load_preserves_raw_records():
-    dataframe = parse_adb_text(SAMPLE_ADB, source_filename="sample.adb")
+    trailing = afda_row("SPARE", "with trailing fields", "Unsigned Analog", "", "0", "4095",
+                        "1", "0", "0", "-", locations=[("1234", 40, 1, 12)])
+    text = FIXTURE + trailing + ",TRAILA,TRAILB\r\n"
+    dataframe = parse_adb_text(text, source_filename="sample.adb")
     repo = DataframeRepository(":memory:")
     document_id = repo.save_dataframe(dataframe, status="PUBLISHED")
     loaded = repo.load_dataframe(document_id)
@@ -27,10 +30,15 @@ def test_adb_parsed_save_load_preserves_raw_records():
         loaded.parameters[0].provenance.raw_record
         == dataframe.parameters[0].provenance.raw_record
     )
-    assert loaded.parameters[0].provenance.extra["trailing_fields"] == [
+    assert loaded.parameters[-1].provenance.extra["trailing_fields"] == [
         "TRAILA",
         "TRAILB",
     ]
+    # the state table and BCD digit weights survive the database too
+    mode = next(p for p in loaded.parameters if p.mnemonic == "MODE SEL")
+    assert [(s.value, s.label) for s in mode.states] == [(0, "OFF"), (1, "LOW"), (2, "MID"), (3, "HIGH")]
+    year = next(p for p in loaded.parameters if p.mnemonic == "01 YEAR")
+    assert sorted(s.bcd_weight for s in year.occurrences[0].segments) == [1.0, 10.0]
     repo.close()
 
 

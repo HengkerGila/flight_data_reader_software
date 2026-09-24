@@ -10,7 +10,7 @@ ARINC717_READER_SYSTEM_DESIGN.md
 ARINC717_READER_SYSTEM_DESIGN_v2.md
 examples/FDS81.pdf
 tools/_ocr_bench/
-firmware/
+firmware/stm32f103_sim_a717/
 feedback/
 laporan/
 afda_adb_sample/

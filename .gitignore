@@ -7,7 +7,6 @@ build/
 dist/
 .venv-win/
 ARINC717_READER_SYSTEM_DESIGN.md
-ARINC717_READER_SYSTEM_DESIGN_v2.md
 examples/FDS81.pdf
 tools/_ocr_bench/
 firmware/
@@ -15,3 +14,4 @@ feedback/
 laporan/
 afda_adb_sample/
 save/
+ARINC717_READER_SYSTEM_DESIGN_v2.md
